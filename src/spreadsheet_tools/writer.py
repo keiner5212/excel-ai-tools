@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from spreadsheet_tools.styles import apply_style_updates, get_cell_style
-from spreadsheet_tools.utils import get_sheet, open_workbook_for_write, validate_cell_address
+from spreadsheet_tools.utils import get_sheet, open_workbook, open_workbook_for_write, safe_save_workbook, validate_cell_address
 
 
 def _serialize_value(value: object | None) -> object | None:
@@ -56,7 +56,7 @@ def edit_cell(
         }
 
         if save:
-            workbook.save(path)
+            safe_save_workbook(workbook, path)
             result["saved"] = True
         else:
             result["saved"] = False
@@ -68,7 +68,9 @@ def edit_cell(
 
 def get_cell_style_info(path: str, *, sheet_name: str | None, address: str) -> dict[str, Any]:
     normalized_address = validate_cell_address(address)
-    workbook = open_workbook_for_write(path)
+    # data_only=False needed to read number formats and formula-based cells correctly.
+    # read_only=False required because read-only mode doesn't expose full cell style objects.
+    workbook = open_workbook(path, read_only=False, data_only=False)
     try:
         sheet = get_sheet(workbook, sheet_name)
         style = get_cell_style(sheet, normalized_address)
@@ -99,7 +101,7 @@ def copy_sheet_structure(
         source = workbook[source_sheet]
         target = workbook.copy_worksheet(source)
         target.title = target_sheet
-        workbook.save(path)
+        safe_save_workbook(workbook, path)
         return {
             "file": path,
             "source_sheet": source_sheet,

@@ -28,3 +28,6 @@ build/
 # Tool output
 output/
 *.json.bak
+
+# ignore all md files (except README.md)
+*.md
