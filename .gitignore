@@ -1,0 +1,30 @@
+# Python / uv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.uv/
+.python-version
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Spreadsheet files (local working copies)
+*.xlsx
+*.xlsm
+*.xls
+*.xlsb
+*.csv
+~$*.xlsx
+~$*.xlsm
+~$*.xls
+
+# Tool output
+output/
+*.json.bak

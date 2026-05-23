@@ -1,0 +1,19 @@
+[project]
+name = "spreadsheet-tools"
+version = "0.1.0"
+description = "AI-friendly Excel (.xlsx/.xlsm) CLI tools with cleaned reads and style-aware edits"
+readme = "README.md"
+authors = [
+    { name = "Keiner Alvarado", email = "kjgameplay0000@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "openpyxl>=3.1.5",
+]
+
+[project.scripts]
+spreadsheet-tools = "spreadsheet_tools.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12.0"]
+build-backend = "uv_build"
