@@ -178,12 +178,12 @@ def batch_edit(
         if not isinstance(edit, dict):
             raise ValueError(
                 f"edits[{i}] must be a dict, got {type(edit).__name__!r}. "
-                "Each edit must be: {\"cell\": \"A1\", \"value\": ..., \"style\": {...}}"
+                'Each edit must be: {"cell": "A1", "value": ..., "style": {...}}'
             )
         if "cell" not in edit:
             raise ValueError(
                 f"edits[{i}] missing required 'cell' field. "
-                "Each edit must be: {\"cell\": \"A1\", \"value\": ..., \"style\": {...}}"
+                'Each edit must be: {"cell": "A1", "value": ..., "style": {...}}'
             )
         validate_cell_address(edit["cell"])
 
@@ -388,7 +388,9 @@ def batch_set_dimensions(
     row_heights:   list of {"row": 1, "height": 30}  (row is 1-based)
     """
     if not column_widths and not row_heights:
-        raise ValueError("At least one of column_widths or row_heights must be provided")
+        raise ValueError(
+            "At least one of column_widths or row_heights must be provided"
+        )
 
     # Validate all inputs before touching the file
     validated_cols: list[tuple[str, float]] = []
@@ -512,9 +514,7 @@ def rename_sheet(
     try:
         if old_name not in workbook.sheetnames:
             available = ", ".join(workbook.sheetnames)
-            raise ValueError(
-                f"Sheet {old_name!r} not found. Available: {available}"
-            )
+            raise ValueError(f"Sheet {old_name!r} not found. Available: {available}")
         if new_name in workbook.sheetnames:
             raise ValueError(f"Sheet {new_name!r} already exists")
         workbook[old_name].title = new_name

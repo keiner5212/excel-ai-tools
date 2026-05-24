@@ -314,7 +314,10 @@ def build_parser() -> argparse.ArgumentParser:
     merge_cmd.add_argument("file")
     merge_cmd.add_argument("--sheet")
     merge_cmd.add_argument(
-        "--range", dest="cell_range", required=True, metavar="RANGE",
+        "--range",
+        dest="cell_range",
+        required=True,
+        metavar="RANGE",
         help="Cell range to merge, e.g. A1:E1",
     )
 
@@ -324,7 +327,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     unmerge_cmd.add_argument("file")
     unmerge_cmd.add_argument("--sheet")
-    unmerge_cmd.add_argument("--range", dest="cell_range", required=True, metavar="RANGE")
+    unmerge_cmd.add_argument(
+        "--range", dest="cell_range", required=True, metavar="RANGE"
+    )
 
     # --- set-column-width ---
     colw_cmd = subparsers.add_parser(
@@ -333,7 +338,9 @@ def build_parser() -> argparse.ArgumentParser:
     colw_cmd.add_argument("file")
     colw_cmd.add_argument("--sheet")
     colw_cmd.add_argument("--col", required=True, help="Column letter, e.g. A")
-    colw_cmd.add_argument("--width", type=float, required=True, help="Width in Excel character units")
+    colw_cmd.add_argument(
+        "--width", type=float, required=True, help="Width in Excel character units"
+    )
 
     # --- set-row-height ---
     rowh_cmd = subparsers.add_parser(
@@ -342,7 +349,9 @@ def build_parser() -> argparse.ArgumentParser:
     rowh_cmd.add_argument("file")
     rowh_cmd.add_argument("--sheet")
     rowh_cmd.add_argument("--row", type=int, required=True, help="Row number (1-based)")
-    rowh_cmd.add_argument("--height", type=float, required=True, help="Height in points")
+    rowh_cmd.add_argument(
+        "--height", type=float, required=True, help="Height in points"
+    )
 
     # --- batch-set-dimensions ---
     bsd_cmd = subparsers.add_parser(
@@ -367,7 +376,8 @@ def build_parser() -> argparse.ArgumentParser:
     freeze_cmd.add_argument("file")
     freeze_cmd.add_argument("--sheet")
     freeze_cmd.add_argument(
-        "--cell", required=True,
+        "--cell",
+        required=True,
         help="Freeze point cell, e.g. B2 freezes row 1 and col A",
     )
 
@@ -385,7 +395,9 @@ def build_parser() -> argparse.ArgumentParser:
     addsh_cmd.add_argument("file")
     addsh_cmd.add_argument("--sheet", required=True, help="Name for the new sheet")
     addsh_cmd.add_argument(
-        "--position", type=int, default=None,
+        "--position",
+        type=int,
+        default=None,
         help="Zero-based sheet index (default: append at end)",
     )
 
@@ -403,18 +415,18 @@ def build_parser() -> argparse.ArgumentParser:
     fmtr_cmd.add_argument("--sheet")
     fmtr_cmd.add_argument("--range", dest="cell_range", required=True, metavar="RANGE")
     fmtr_cmd.add_argument(
-        "--style-json", required=True,
+        "--style-json",
+        required=True,
         help='Style overrides as JSON, e.g. {"font":{"bold":true},"fill":{"fill_type":"solid","start_color":"1F4E79"}}',
     )
 
     # --- set-tab-color ---
-    tabc_cmd = subparsers.add_parser(
-        "set-tab-color", help="Set the sheet tab color"
-    )
+    tabc_cmd = subparsers.add_parser("set-tab-color", help="Set the sheet tab color")
     tabc_cmd.add_argument("file")
     tabc_cmd.add_argument("--sheet")
     tabc_cmd.add_argument(
-        "--color", required=True,
+        "--color",
+        required=True,
         help="6-char RGB hex string without #, e.g. 1F4E79",
     )
 
@@ -425,7 +437,10 @@ def build_parser() -> argparse.ArgumentParser:
     af_cmd.add_argument("file")
     af_cmd.add_argument("--sheet")
     af_cmd.add_argument(
-        "--range", dest="cell_range", default=None, metavar="RANGE",
+        "--range",
+        dest="cell_range",
+        default=None,
+        metavar="RANGE",
         help="Header range for auto-filter, e.g. A8:E8. Omit to clear auto-filter.",
     )
 
@@ -603,11 +618,15 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(create_empty_workbook(args.file, sheet_name=args.sheet))
         elif args.command == "merge-cells":
             _print_json(
-                merge_cells(args.file, sheet_name=args.sheet, cell_range=args.cell_range)
+                merge_cells(
+                    args.file, sheet_name=args.sheet, cell_range=args.cell_range
+                )
             )
         elif args.command == "unmerge-cells":
             _print_json(
-                unmerge_cells(args.file, sheet_name=args.sheet, cell_range=args.cell_range)
+                unmerge_cells(
+                    args.file, sheet_name=args.sheet, cell_range=args.cell_range
+                )
             )
         elif args.command == "set-column-width":
             _print_json(
@@ -637,22 +656,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "freeze-panes":
-            _print_json(
-                freeze_panes(args.file, sheet_name=args.sheet, cell=args.cell)
-            )
+            _print_json(freeze_panes(args.file, sheet_name=args.sheet, cell=args.cell))
         elif args.command == "unfreeze-panes":
             _print_json(unfreeze_panes(args.file, sheet_name=args.sheet))
         elif args.command == "add-sheet":
             _print_json(
-                add_sheet(
-                    args.file, sheet_name=args.sheet, position=args.position
-                )
+                add_sheet(args.file, sheet_name=args.sheet, position=args.position)
             )
         elif args.command == "rename-sheet":
             _print_json(
-                rename_sheet(
-                    args.file, old_name=args.old_name, new_name=args.new_name
-                )
+                rename_sheet(args.file, old_name=args.old_name, new_name=args.new_name)
             )
         elif args.command == "format-range":
             style = _load_json_arg(args.style_json)

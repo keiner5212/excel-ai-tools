@@ -92,9 +92,7 @@ def validate_cell_range(range_str: str) -> tuple[str, str]:
     normalized = range_str.strip().upper()
     m = RANGE_RE.match(normalized)
     if not m:
-        raise ValueError(
-            f"Invalid cell range: {range_str!r}. Expected A1:B2 format."
-        )
+        raise ValueError(f"Invalid cell range: {range_str!r}. Expected A1:B2 format.")
     return m.group(1), m.group(2)
 
 
