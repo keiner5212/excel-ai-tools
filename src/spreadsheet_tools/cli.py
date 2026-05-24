@@ -8,17 +8,28 @@ import zipfile
 from typing import Any
 
 from spreadsheet_tools.reader import (
+    audit_range,
+    describe_section,
     find_values,
     list_sheets,
     read_cell,
     read_range,
+    section_map,
     sheet_info,
+    validate_rules,
     workbook_info,
 )
 from spreadsheet_tools.writer import (
+    batch_edit,
     copy_sheet_structure,
     edit_cell,
+    find_replace,
     get_cell_style_info,
+)
+from spreadsheet_tools.snapshot import (
+    create_snapshot,
+    diff_snapshots,
+    list_snapshots,
 )
 
 
@@ -152,6 +163,126 @@ def build_parser() -> argparse.ArgumentParser:
     copy_cmd.add_argument("--target-sheet", required=True)
     copy_cmd.add_argument("--overwrite", action="store_true")
 
+    # --- section-map ---
+    smap_cmd = subparsers.add_parser(
+        "section-map", help="Discover numbered section headers and their row ranges"
+    )
+    smap_cmd.add_argument("file")
+    smap_cmd.add_argument("--sheet")
+    smap_cmd.add_argument("--min-row", type=int, default=0, help="Zero-based start row")
+    smap_cmd.add_argument(
+        "--max-row", type=int, default=None, help="Zero-based end row (default: sheet max)"
+    )
+
+    # --- audit-range ---
+    audit_cmd = subparsers.add_parser(
+        "audit-range", help="Audit master cells in a range, flagging empty ones"
+    )
+    audit_cmd.add_argument("file")
+    audit_cmd.add_argument("--sheet")
+    audit_cmd.add_argument("--from-col", required=True)
+    audit_cmd.add_argument("--to-col", required=True)
+    audit_cmd.add_argument("--from-row", type=int, required=True)
+    audit_cmd.add_argument("--to-row", type=int, required=True)
+    audit_cmd.add_argument(
+        "--show-slaves", action="store_true", help="Include slave (non-writable) cells"
+    )
+
+    # --- describe-section ---
+    desc_cmd = subparsers.add_parser(
+        "describe-section",
+        help="Audit a strategy table for name/description consistency",
+    )
+    desc_cmd.add_argument("file")
+    desc_cmd.add_argument("--sheet")
+    desc_cmd.add_argument(
+        "--data-rows",
+        required=True,
+        help="Zero-based row range, e.g. 325-328",
+    )
+    desc_cmd.add_argument("--header-row", type=int, default=None)
+    desc_cmd.add_argument("--name-col", default="B", help="Column with strategy names")
+    desc_cmd.add_argument("--desc-col", default="D", help="Column with descriptions")
+    desc_cmd.add_argument(
+        "--cost-col", default="L", help="Column with annual costs (pass '' to skip)"
+    )
+
+    # --- find-replace ---
+    fr_cmd = subparsers.add_parser(
+        "find-replace", help="Search cell values and optionally replace matches"
+    )
+    fr_cmd.add_argument("file")
+    fr_cmd.add_argument("--query", required=True)
+    fr_cmd.add_argument("--replace-with", default=None, help="Replacement value")
+    fr_cmd.add_argument("--sheet")
+    fr_cmd.add_argument("--case-sensitive", action="store_true")
+    fr_cmd.add_argument("--regex", action="store_true", help="Treat --query as regex")
+    fr_cmd.add_argument("--dry-run", action="store_true")
+    fr_cmd.add_argument("--max-results", type=int, default=200)
+
+    # --- validate ---
+    val_cmd = subparsers.add_parser(
+        "validate", help="Apply validation rules against a sheet"
+    )
+    val_cmd.add_argument("file")
+    val_cmd.add_argument("--sheet")
+    val_cmd.add_argument(
+        "--rule",
+        dest="rules",
+        action="append",
+        required=True,
+        metavar="RULE",
+        help=(
+            "Validation rule, repeatable. Examples: "
+            "'not-empty:D317', "
+            "'price-min-max:F308:H308', "
+            "'name-matches-desc:B325:D325', "
+            "'numeric-range:L317:50000:2000000', "
+            "'string-contains:D317:Descuento', "
+            "'no-generic-name:B325'"
+        ),
+    )
+
+    # --- batch-edit ---
+    batch_cmd = subparsers.add_parser(
+        "batch-edit", help="Apply multiple cell edits atomically in one save"
+    )
+    batch_cmd.add_argument("file")
+    batch_cmd.add_argument("--sheet")
+    _batch_src = batch_cmd.add_mutually_exclusive_group(required=True)
+    _batch_src.add_argument(
+        "--edits-file", help="Path to JSON file with edits array"
+    )
+    _batch_src.add_argument(
+        "--edits-json", help="Inline JSON edits array"
+    )
+    batch_cmd.add_argument("--dry-run", action="store_true")
+
+    # --- snapshot ---
+    snap_cmd = subparsers.add_parser(
+        "snapshot", help="Capture sheet cell values to a named snapshot"
+    )
+    snap_cmd.add_argument("file")
+    snap_cmd.add_argument("--sheet")
+    snap_cmd.add_argument("--tag", required=True, help="Snapshot tag name")
+    snap_cmd.add_argument("--description", default=None)
+
+    # --- snapshot-diff ---
+    diff_cmd = subparsers.add_parser(
+        "snapshot-diff", help="Compare two snapshots and list changed cells"
+    )
+    diff_cmd.add_argument("file")
+    diff_cmd.add_argument("--sheet")
+    diff_cmd.add_argument("--tag-a", required=True)
+    diff_cmd.add_argument("--tag-b", required=True)
+
+    # --- list-snapshots ---
+    ls_snap_cmd = subparsers.add_parser(
+        "list-snapshots", help="List available snapshots for a sheet"
+    )
+    ls_snap_cmd.add_argument("file")
+    ls_snap_cmd.add_argument("--sheet")
+
     return parser
 
 
@@ -221,6 +352,110 @@ def main(argv: list[str] | None = None) -> int:
                     overwrite=args.overwrite,
                 )
             )
+        elif args.command == "section-map":
+            _print_json(
+                section_map(
+                    args.file,
+                    sheet_name=args.sheet,
+                    min_row=args.min_row,
+                    max_row=args.max_row,
+                )
+            )
+        elif args.command == "audit-range":
+            _print_json(
+                audit_range(
+                    args.file,
+                    sheet_name=args.sheet,
+                    from_col=args.from_col,
+                    to_col=args.to_col,
+                    from_row=args.from_row,
+                    to_row=args.to_row,
+                    show_slaves=args.show_slaves,
+                )
+            )
+        elif args.command == "describe-section":
+            raw = args.data_rows
+            try:
+                start_str, end_str = raw.split("-", 1)
+                from_data = int(start_str)
+                to_data = int(end_str)
+            except ValueError:
+                parser.error("--data-rows must be in format START-END, e.g. 325-328")
+            cost_col_arg = args.cost_col if args.cost_col.strip() else None
+            _print_json(
+                describe_section(
+                    args.file,
+                    sheet_name=args.sheet,
+                    from_data_row=from_data,
+                    to_data_row=to_data,
+                    name_col=args.name_col,
+                    desc_col=args.desc_col,
+                    cost_col=cost_col_arg,
+                    header_row=args.header_row,
+                )
+            )
+        elif args.command == "find-replace":
+            replace_val = (
+                _coerce_value(args.replace_with)
+                if args.replace_with is not None
+                else None
+            )
+            _print_json(
+                find_replace(
+                    args.file,
+                    query=args.query,
+                    replace_with=str(replace_val) if replace_val is not None else None,
+                    sheet_name=args.sheet,
+                    case_sensitive=args.case_sensitive,
+                    use_regex=args.regex,
+                    dry_run=args.dry_run,
+                    max_results=args.max_results,
+                )
+            )
+        elif args.command == "validate":
+            _print_json(
+                validate_rules(
+                    args.file,
+                    sheet_name=args.sheet,
+                    rules=args.rules,
+                )
+            )
+        elif args.command == "batch-edit":
+            if args.edits_file:
+                with open(args.edits_file, encoding="utf-8") as fh:
+                    raw_edits = json.load(fh)
+            else:
+                raw_edits = json.loads(args.edits_json)
+            if not isinstance(raw_edits, list):
+                parser.error("edits must be a JSON array")
+            _print_json(
+                batch_edit(
+                    args.file,
+                    sheet_name=args.sheet,
+                    edits=raw_edits,
+                    dry_run=args.dry_run,
+                )
+            )
+        elif args.command == "snapshot":
+            _print_json(
+                create_snapshot(
+                    args.file,
+                    sheet_name=args.sheet,
+                    tag=args.tag,
+                    description=args.description,
+                )
+            )
+        elif args.command == "snapshot-diff":
+            _print_json(
+                diff_snapshots(
+                    args.file,
+                    sheet_name=args.sheet,
+                    tag_a=args.tag_a,
+                    tag_b=args.tag_b,
+                )
+            )
+        elif args.command == "list-snapshots":
+            _print_json(list_snapshots(args.file, sheet_name=args.sheet))
         else:
             parser.error(f"Unknown command: {args.command}")
     except (

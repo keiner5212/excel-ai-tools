@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from spreadsheet_tools.cleaner import build_merge_lookup
@@ -142,3 +143,200 @@ def copy_sheet_structure(
         }
     finally:
         workbook.close()
+
+
+def batch_edit(
+    path: str,
+    *,
+    sheet_name: str | None = None,
+    edits: list[dict[str, Any]],
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Apply multiple cell edits atomically in one workbook load/save cycle.
+
+    Each edit dict must contain ``cell`` (address string) and at least one of:
+    ``value``, ``clear`` (bool), or ``style`` (dict).
+
+    All addresses are validated before any edit is applied.  If validation
+    fails the workbook is never opened for writing.
+    """
+    if not edits:
+        raise ValueError("edits list is empty")
+
+    # Validate all addresses upfront so we fail early before touching the file
+    for i, edit in enumerate(edits):
+        if "cell" not in edit:
+            raise ValueError(f"edits[{i}] missing required 'cell' field")
+        validate_cell_address(edit["cell"])
+
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        merge_lookup = build_merge_lookup(sheet)
+        applied: list[dict[str, Any]] = []
+
+        for edit in edits:
+            address = validate_cell_address(edit["cell"])
+            effective_addr = address
+            warning: str | None = None
+
+            if address in merge_lookup:
+                range_str, master = merge_lookup[address]
+                if address != master:
+                    warning = (
+                        f"Address {address} is a slave of merged range {range_str}. "
+                        f"Redirected to master cell {master}."
+                    )
+                    effective_addr = master
+
+            cell = sheet[effective_addr]
+            value = edit.get("value")
+            clear = edit.get("clear", False)
+            style = edit.get("style")
+
+            if clear:
+                cell.value = None
+            elif value is not None:
+                cell.value = value
+
+            if style:
+                apply_style_updates(cell, style)
+
+            entry: dict[str, Any] = {
+                "cell": edit["cell"],
+                "effective_address": effective_addr,
+                "new_value": _serialize_value(cell.value),
+                "style_changed": bool(style),
+            }
+            if warning:
+                entry["warning"] = warning
+            applied.append(entry)
+
+        result: dict[str, Any] = {
+            "file": path,
+            "sheet": sheet.title,
+            "applied": len(applied),
+            "dry_run": dry_run,
+            "cells": applied,
+        }
+
+        if not dry_run:
+            safe_save_workbook(workbook, path)
+            result["saved"] = True
+        else:
+            result["saved"] = False
+
+        return result
+    finally:
+        workbook.close()
+
+
+def find_replace(
+    path: str,
+    *,
+    query: str,
+    replace_with: str | None = None,
+    sheet_name: str | None = None,
+    case_sensitive: bool = False,
+    use_regex: bool = False,
+    dry_run: bool = False,
+    max_results: int = 200,
+) -> dict[str, Any]:
+    """Search cell values and optionally replace matches.
+
+    Matching is exact-value by default (the entire cell value must equal the
+    query string).  Pass ``use_regex=True`` for substring/regex matching.
+
+    Two-pass approach: read pass collects matches with data_only=True (computed
+    values); write pass applies replacements using a separate workbook load.
+    """
+    from spreadsheet_tools.reader import _serialize_value
+
+    flags = 0 if case_sensitive else re.IGNORECASE
+    pattern: re.Pattern[str] | None = re.compile(query, flags) if use_regex else None
+    needle = query if case_sensitive else query.lower()
+
+    # --- Pass 1: find matches (read-only, computed values) ---
+    matches: list[dict[str, Any]] = []
+    read_wb = open_workbook(path, read_only=False, data_only=True)
+    try:
+        target_sheets = (
+            [get_sheet(read_wb, sheet_name)]
+            if sheet_name
+            else [read_wb[name] for name in read_wb.sheetnames]
+        )
+        for sheet in target_sheets:
+            if len(matches) >= max_results:
+                break
+            for row in sheet.iter_rows():
+                if len(matches) >= max_results:
+                    break
+                for cell in row:
+                    if cell.value is None:
+                        continue
+                    val_str = str(cell.value)
+                    if use_regex:
+                        matched = bool(pattern.search(val_str))  # type: ignore[union-attr]
+                    else:
+                        compare = val_str if case_sensitive else val_str.lower()
+                        matched = needle == compare
+                    if matched:
+                        matches.append(
+                            {
+                                "sheet": sheet.title,
+                                "address": cell.coordinate,
+                                "value": _serialize_value(cell.value),
+                            }
+                        )
+    finally:
+        read_wb.close()
+
+    result: dict[str, Any] = {
+        "file": path,
+        "query": query,
+        "total": len(matches),
+        "truncated": len(matches) >= max_results,
+        "matches": matches,
+    }
+
+    if replace_with is None:
+        return result
+
+    result["replace_with"] = replace_with
+
+    # Compute new values for each match
+    replacements: list[dict[str, Any]] = []
+    for m in matches:
+        if use_regex:
+            new_val: Any = re.sub(query, replace_with, str(m["value"]), flags=flags)
+        else:
+            new_val = replace_with
+        replacements.append(
+            {
+                "sheet": m["sheet"],
+                "address": m["address"],
+                "before": m["value"],
+                "after": new_val,
+            }
+        )
+
+    if dry_run:
+        result["dry_run"] = True
+        result["replacements_preview"] = replacements
+        result["saved"] = False
+        return result
+
+    # --- Pass 2: apply replacements ---
+    write_wb = open_workbook_for_write(path)
+    try:
+        for rep in replacements:
+            ws = get_sheet(write_wb, rep["sheet"])
+            ws[rep["address"]].value = rep["after"]  # type: ignore[union-attr]
+        safe_save_workbook(write_wb, path)
+    finally:
+        write_wb.close()
+
+    result["dry_run"] = False
+    result["replacements"] = replacements
+    result["saved"] = True
+    return result
