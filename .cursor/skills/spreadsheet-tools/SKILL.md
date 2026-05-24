@@ -309,6 +309,14 @@ uv run spreadsheet-tools snapshot-diff "file.xlsm" \
   --tag-a "before-edit" --tag-b "after-edit"
 ```
 
+### create-empty-workbook
+
+Create new empty workbook from scratch (overwrites existing file).
+
+```bash
+uv run spreadsheet-tools create-empty-workbook "new_file.xlsx" [--sheet "Sheet1"]
+```
+
 ### list-snapshots
 
 ```bash

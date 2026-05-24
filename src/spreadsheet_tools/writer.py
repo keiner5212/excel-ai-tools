@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from openpyxl import Workbook
+
 from spreadsheet_tools.cleaner import build_merge_lookup
 from spreadsheet_tools.styles import apply_style_updates, get_cell_style
 from spreadsheet_tools.utils import (
@@ -229,6 +231,15 @@ def batch_edit(
         return result
     finally:
         workbook.close()
+
+
+def create_empty_workbook(path: str, sheet_name: str = "Sheet1") -> dict[str, Any]:
+    """Create new empty workbook with one sheet, overwriting existing file."""
+    workbook = Workbook()
+    ws = workbook.active
+    ws.title = sheet_name
+    workbook.save(path)
+    return {"file": path, "sheet": sheet_name, "created": True}
 
 
 def find_replace(

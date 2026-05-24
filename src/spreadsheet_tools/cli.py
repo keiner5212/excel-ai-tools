@@ -22,6 +22,7 @@ from spreadsheet_tools.reader import (
 from spreadsheet_tools.writer import (
     batch_edit,
     copy_sheet_structure,
+    create_empty_workbook,
     edit_cell,
     find_replace,
     get_cell_style_info,
@@ -282,6 +283,13 @@ def build_parser() -> argparse.ArgumentParser:
     ls_snap_cmd.add_argument("file")
     ls_snap_cmd.add_argument("--sheet")
 
+    # --- create-empty-workbook ---
+    new_cmd = subparsers.add_parser(
+        "create-empty-workbook", help="Create new empty Excel workbook"
+    )
+    new_cmd.add_argument("file", help="Output path for new workbook")
+    new_cmd.add_argument("--sheet", default="Sheet1", help="Name of the first sheet")
+
     return parser
 
 
@@ -452,6 +460,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "list-snapshots":
             _print_json(list_snapshots(args.file, sheet_name=args.sheet))
+        elif args.command == "create-empty-workbook":
+            _print_json(create_empty_workbook(args.file, sheet_name=args.sheet))
         else:
             parser.error(f"Unknown command: {args.command}")
     except (
