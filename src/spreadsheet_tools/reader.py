@@ -216,6 +216,12 @@ def find_values(
         matches: list[dict[str, Any]] = []
 
         for sheet in sheets:
+            # read_only mode doesn't support merged_cells; skip merge lookup there
+            try:
+                merge_lookup = build_merge_lookup(sheet)  # type: ignore[arg-type]
+            except AttributeError:
+                merge_lookup = {}
+
             for row in sheet.iter_rows():
                 for cell in row:
                     value = _serialize_value(cell.value)
@@ -224,13 +230,20 @@ def find_values(
                     haystack = str(value)
                     compare = haystack if case_sensitive else haystack.casefold()
                     if needle in compare:
-                        matches.append(
-                            {
-                                "sheet": sheet.title,
-                                "address": cell.coordinate,
-                                "value": value,
+                        match: dict[str, Any] = {
+                            "sheet": sheet.title,
+                            "address": cell.coordinate,
+                            "value": value,
+                        }
+                        if cell.coordinate in merge_lookup:
+                            range_str, master = merge_lookup[cell.coordinate]
+                            role = "master" if cell.coordinate == master else "slave"
+                            match["merge"] = {
+                                "range": range_str,
+                                "role": role,
+                                "master": master,
                             }
-                        )
+                        matches.append(match)
                         if len(matches) >= max_results:
                             return {
                                 "file": path,

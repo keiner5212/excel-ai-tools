@@ -20,6 +20,24 @@ from spreadsheet_tools.writer import (
 )
 
 
+def _coerce_value(raw: str) -> object:
+    """Coerce a CLI string value to int, float, or str.
+
+    This prevents numeric data from being stored as text in Excel,
+    which would break formulas and sorting. Booleans are kept as strings
+    because "TRUE"/"FALSE" are ambiguous across locales.
+    """
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    return raw
+
+
 def _print_json(payload: dict[str, Any]) -> None:
     json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
@@ -169,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.file,
                     sheet_name=args.sheet,
                     address=args.cell,
-                    value=args.value,
+                    value=_coerce_value(args.value) if args.value is not None else None,
                     clear_value=args.clear,
                     style=_load_json_arg(args.style_json),
                     save=not args.dry_run,

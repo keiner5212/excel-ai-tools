@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from spreadsheet_tools.cleaner import build_merge_lookup
 from spreadsheet_tools.styles import apply_style_updates, get_cell_style
 from spreadsheet_tools.utils import (
     get_sheet,
@@ -27,6 +28,25 @@ def _serialize_value(value: object | None) -> object | None:
     return value
 
 
+def _resolve_write_address(sheet: Any, address: str) -> tuple[str, str | None]:
+    """Return (effective_address, warning).
+
+    If address is a slave cell of a merge, redirect to master and warn.
+    Writing to slave cells is silently ignored by Excel; only master shows data.
+    """
+    merge_lookup = build_merge_lookup(sheet)
+    if address not in merge_lookup:
+        return address, None
+    range_str, master = merge_lookup[address]
+    if address == master:
+        return address, None
+    warning = (
+        f"Address {address} is a slave cell of merged range {range_str}. "
+        f"Redirected to master cell {master}."
+    )
+    return master, warning
+
+
 def edit_cell(
     path: str,
     *,
@@ -41,7 +61,8 @@ def edit_cell(
     workbook = open_workbook_for_write(path)
     try:
         sheet = get_sheet(workbook, sheet_name)
-        cell = sheet[normalized_address]
+        effective_address, warning = _resolve_write_address(sheet, normalized_address)
+        cell = sheet[effective_address]
 
         if clear_value:
             cell.value = None
@@ -51,15 +72,18 @@ def edit_cell(
         if style:
             apply_style_updates(cell, style)
 
-        result = {
+        result: dict[str, Any] = {
             "file": path,
             "sheet": sheet.title,
-            "address": normalized_address,
+            "address": effective_address,
             "updated": {
                 "value": cell.value,
                 "style_changed": bool(style),
             },
         }
+
+        if warning:
+            result["warning"] = warning
 
         if save:
             safe_save_workbook(workbook, path)
