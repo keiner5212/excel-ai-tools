@@ -110,7 +110,11 @@ def _alignment_to_dict(alignment: Alignment | None) -> dict[str, Any] | None:
 def get_cell_style(worksheet: Worksheet, address: str) -> dict[str, Any]:
     column, row = parse_cell_address(address)
     cell = worksheet[f"{column}{row}"]
-    number_format = cell.number_format if cell.number_format and cell.number_format != "General" else None
+    number_format = (
+        cell.number_format
+        if cell.number_format and cell.number_format != "General"
+        else None
+    )
     style = {
         "address": address.upper(),
         "value": cell.value,
@@ -127,7 +131,11 @@ def get_cell_style(worksheet: Worksheet, address: str) -> dict[str, Any]:
         "comment": cell.comment.text if cell.comment else None,
         "hyperlink": cell.hyperlink.target if cell.hyperlink else None,
     }
-    return {key: value for key, value in style.items() if value not in (None, {"locked": True, "hidden": False})}
+    return {
+        key: value
+        for key, value in style.items()
+        if value not in (None, {"locked": True, "hidden": False})
+    }
 
 
 def _parse_color(value: str | None) -> str | None:
@@ -154,7 +162,9 @@ def apply_style_updates(cell: Any, style: dict[str, Any]) -> None:
             italic=font_data.get("italic", current.italic),
             underline=font_data.get("underline", current.underline),
             strike=font_data.get("strike", current.strike),
-            color=_parse_color(font_data.get("color")) if font_data.get("color") else current.color,
+            color=_parse_color(font_data.get("color"))
+            if font_data.get("color")
+            else current.color,
         )
 
     if "fill" in style and isinstance(style["fill"], dict):
@@ -184,10 +194,14 @@ def apply_style_updates(cell: Any, style: dict[str, Any]) -> None:
         from openpyxl.comments import Comment
 
         comment_text = style["comment"]
-        cell.comment = Comment(comment_text, "spreadsheet-tools") if comment_text else None
+        cell.comment = (
+            Comment(comment_text, "spreadsheet-tools") if comment_text else None
+        )
 
     if "hyperlink" in style:
         from openpyxl.worksheet.hyperlink import Hyperlink
 
         target = style["hyperlink"]
-        cell.hyperlink = Hyperlink(ref=cell.coordinate, target=target) if target else None
+        cell.hyperlink = (
+            Hyperlink(ref=cell.coordinate, target=target) if target else None
+        )

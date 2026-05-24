@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from spreadsheet_tools.styles import apply_style_updates, get_cell_style
-from spreadsheet_tools.utils import get_sheet, open_workbook, open_workbook_for_write, safe_save_workbook, validate_cell_address
+from spreadsheet_tools.utils import (
+    get_sheet,
+    open_workbook,
+    open_workbook_for_write,
+    safe_save_workbook,
+    validate_cell_address,
+)
 
 
 def _serialize_value(value: object | None) -> object | None:
@@ -66,7 +72,9 @@ def edit_cell(
         workbook.close()
 
 
-def get_cell_style_info(path: str, *, sheet_name: str | None, address: str) -> dict[str, Any]:
+def get_cell_style_info(
+    path: str, *, sheet_name: str | None, address: str
+) -> dict[str, Any]:
     normalized_address = validate_cell_address(address)
     # data_only=False needed to read number formats and formula-based cells correctly.
     # read_only=False required because read-only mode doesn't expose full cell style objects.

@@ -25,8 +25,12 @@ def resolve_path(path: str) -> Path:
     return resolved
 
 
-def open_workbook(path: str, *, read_only: bool = False, data_only: bool = True) -> Workbook:
-    return load_workbook(resolve_path(path), read_only=read_only, data_only=data_only, keep_vba=True)
+def open_workbook(
+    path: str, *, read_only: bool = False, data_only: bool = True
+) -> Workbook:
+    return load_workbook(
+        resolve_path(path), read_only=read_only, data_only=data_only, keep_vba=True
+    )
 
 
 def open_workbook_for_write(path: str) -> Workbook:
@@ -64,12 +68,17 @@ def parse_cell_address(address: str) -> tuple[str, int]:
 
 
 def get_sheet(workbook: Workbook, sheet_name: str | None) -> Worksheet:
-    if sheet_name is None:
-        return workbook.active
-    if sheet_name not in workbook.sheetnames:
+    sheet = workbook.active if sheet_name is None else workbook[sheet_name]
+    if sheet is None:
+        raise ValueError("No active sheet found in workbook")
+    if sheet_name is not None and sheet_name not in workbook.sheetnames:
         available = ", ".join(workbook.sheetnames)
         raise ValueError(f"Sheet {sheet_name!r} not found. Available: {available}")
-    return workbook[sheet_name]
+    if not isinstance(sheet, Worksheet):
+        raise ValueError(
+            f"Sheet {sheet_name!r} is not a worksheet (may be a chart sheet)"
+        )
+    return sheet
 
 
 def normalize_scalar(value: object) -> object | None:
@@ -81,7 +90,9 @@ def normalize_scalar(value: object) -> object | None:
     return value
 
 
-def _merge_rels(orig_data: bytes, new_data: bytes, *, prefer_new: bool = False) -> bytes:
+def _merge_rels(
+    orig_data: bytes, new_data: bytes, *, prefer_new: bool = False
+) -> bytes:
     """Merge two .rels XML files.
 
     Default (prefer_new=False): starts from original, appends any new entries
@@ -112,7 +123,9 @@ def _merge_rels(orig_data: bytes, new_data: bytes, *, prefer_new: bool = False) 
             base_root.append(el)
 
     xml_str = ET.tostring(base_root, encoding="unicode")
-    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_str).encode("utf-8")
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_str
+    ).encode("utf-8")
 
 
 def _merge_content_types(orig_data: bytes, new_data: bytes) -> bytes:
@@ -142,14 +155,103 @@ def _merge_content_types(orig_data: bytes, new_data: bytes) -> bytes:
             orig_root.append(el)
 
     xml_str = ET.tostring(orig_root, encoding="unicode")
-    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_str).encode("utf-8")
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_str
+    ).encode("utf-8")
 
 
-def _merge_workbook_zips(original_path: Path, new_buf: io.BytesIO, out_path: Path) -> None:
+_WORKSHEET_RE = re.compile(r"^xl/worksheets/sheet\d+\.xml$")
+
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_R_NS_DECL = f'xmlns:r="{_R_NS}"'
+
+
+def _ensure_r_namespace(element_snippet: str) -> str:
+    """Add xmlns:r declaration if the element uses r: prefix but lacks the declaration.
+
+    openpyxl does not declare r: on the worksheet root element; it inlines
+    xmlns:r on each child element that needs it (legacyDrawing, hyperlink).
+    Drawing elements restored from the original must follow the same pattern.
+    """
+    if "r:" not in element_snippet or _R_NS_DECL in element_snippet:
+        return element_snippet
+    # Insert xmlns:r before the first attribute or before the closing />
+    return re.sub(r"(<\w+)", rf"\1 {_R_NS_DECL}", element_snippet, count=1)
+
+
+# Elements openpyxl silently drops from worksheet XML.
+# They must be restored verbatim so Excel can locate drawings/images.
+_DROPPED_ELEMENT_TAGS = ("drawing", "legacyDrawing", "picture")
+
+
+def _extract_drawing_elements(sheet_xml: bytes) -> list[str]:
+    """Return raw XML snippets of drawing/legacyDrawing/picture elements."""
+    tag_pattern = "|".join(_DROPPED_ELEMENT_TAGS)
+    return re.findall(
+        rf"<(?:{tag_pattern})(?:\s[^>]*)?\s*/>",
+        sheet_xml.decode("utf-8", errors="replace"),
+    )
+
+
+def _inject_drawing_elements(new_xml: bytes, elements: list[str]) -> bytes:
+    """Inject missing drawing/picture elements into openpyxl's worksheet XML.
+
+    Inserts them right before </worksheet> so they appear in the correct
+    position per OOXML spec (after sheetData, pageMargins, etc.).
+    Drawing elements reference relationships by rId; the companion .rels
+    merge ensures those rIds still resolve to the correct targets.
+
+    legacyDrawing and picture are limited to one per sheet; openpyxl already
+    writes its own version of these, so we never duplicate them.
+    """
+    if not elements:
+        return new_xml
+
+    text = new_xml.decode("utf-8", errors="replace")
+    tag_pattern = "|".join(_DROPPED_ELEMENT_TAGS)
+
+    # Tags where at most one element per sheet is allowed (openpyxl already wrote one)
+    _SINGLE_INSTANCE_TAGS = {"legacyDrawing", "picture"}
+    existing_tags = set(re.findall(rf"<({tag_pattern})[\s/>]", text))
+    existing_rids = set(re.findall(rf'(?:{tag_pattern})\s+[^>]*r:id="([^"]+)"', text))
+
+    to_inject = []
+    for snippet in elements:
+        tag_match = re.match(r"<(\w+)", snippet)
+        if not tag_match:
+            continue
+        tag = tag_match.group(1)
+        # Skip if this single-instance tag is already present in new XML
+        if tag in _SINGLE_INSTANCE_TAGS and tag in existing_tags:
+            continue
+        rid_match = re.search(r'r:id="([^"]+)"', snippet)
+        rid = rid_match.group(1) if rid_match else None
+        if rid is None or rid not in existing_rids:
+            to_inject.append(snippet)
+
+    if not to_inject:
+        return new_xml
+
+    injected_block = "\n".join(_ensure_r_namespace(s) for s in to_inject)
+    text = text.replace("</worksheet>", f"{injected_block}</worksheet>", 1)
+    return text.encode("utf-8")
+
+
+def _patch_worksheet_xml(orig_data: bytes, new_data: bytes) -> bytes:
+    """Restore drawing references dropped by openpyxl from worksheet XML."""
+    orig_elements = _extract_drawing_elements(orig_data)
+    return _inject_drawing_elements(new_data, orig_elements)
+
+
+def _merge_workbook_zips(
+    original_path: Path, new_buf: io.BytesIO, out_path: Path
+) -> None:
     """Build a merged ZIP that preserves ALL original content.
 
     Algorithm:
     - Take every file from openpyxl's output (updated cells, styles, workbook XML).
+    - For worksheet XML files: restore drawing/legacyDrawing/picture elements
+      that openpyxl silently drops (images, charts, VML shapes).
     - For .rels files present in both ZIPs: merge relationship entries so
       openpyxl never silently drops drawing/image/chart references.
     - For [Content_Types].xml: merge from original + add new openpyxl entries.
@@ -179,7 +281,13 @@ def _merge_workbook_zips(original_path: Path, new_buf: io.BytesIO, out_path: Pat
                         # to wrong targets (theme, styles, vbaProject instead of
                         # the actual worksheet files).
                         prefer_new = name == "xl/_rels/workbook.xml.rels"
-                        data = _merge_rels(orig_zip.read(name), data, prefer_new=prefer_new)
+                        data = _merge_rels(
+                            orig_zip.read(name), data, prefer_new=prefer_new
+                        )
+                    elif _WORKSHEET_RE.match(name):
+                        # openpyxl drops <drawing>, <legacyDrawing>, <picture>
+                        # elements from sheet XML; restore them from the original.
+                        data = _patch_worksheet_xml(orig_zip.read(name), data)
                 except Exception:
                     pass  # fall back to openpyxl's version on parse error
             out_zip.writestr(new_zip.getinfo(name), data)

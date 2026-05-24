@@ -13,7 +13,11 @@ from spreadsheet_tools.reader import (
     sheet_info,
     workbook_info,
 )
-from spreadsheet_tools.writer import copy_sheet_structure, edit_cell, get_cell_style_info
+from spreadsheet_tools.writer import (
+    copy_sheet_structure,
+    edit_cell,
+    get_cell_style_info,
+)
 
 
 def _print_json(payload: dict[str, Any]) -> None:
@@ -43,17 +47,27 @@ def build_parser() -> argparse.ArgumentParser:
     info_cmd = subparsers.add_parser("workbook-info", help="Workbook metadata")
     info_cmd.add_argument("file")
 
-    sheet_cmd = subparsers.add_parser("sheet-info", help="Sheet dimensions and structure")
+    sheet_cmd = subparsers.add_parser(
+        "sheet-info", help="Sheet dimensions and structure"
+    )
     sheet_cmd.add_argument("file")
     sheet_cmd.add_argument("--sheet", help="Sheet name (defaults to active sheet)")
 
-    read_cmd = subparsers.add_parser("read-range", help="Read a cleaned value-only range")
+    read_cmd = subparsers.add_parser(
+        "read-range", help="Read a cleaned value-only range"
+    )
     read_cmd.add_argument("file")
     read_cmd.add_argument("--sheet")
-    read_cmd.add_argument("--from-col", required=True, help="Start column letter, e.g. A")
+    read_cmd.add_argument(
+        "--from-col", required=True, help="Start column letter, e.g. A"
+    )
     read_cmd.add_argument("--to-col", required=True, help="End column letter, e.g. L")
-    read_cmd.add_argument("--from-row", type=int, required=True, help="Zero-based start row")
-    read_cmd.add_argument("--to-row", type=int, required=True, help="Zero-based end row")
+    read_cmd.add_argument(
+        "--from-row", type=int, required=True, help="Zero-based start row"
+    )
+    read_cmd.add_argument(
+        "--to-row", type=int, required=True, help="Zero-based end row"
+    )
     read_cmd.add_argument(
         "--include-empty-rows",
         action="store_true",
@@ -103,7 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
     find_cmd.add_argument("--case-sensitive", action="store_true")
     find_cmd.add_argument("--max-results", type=int, default=50)
 
-    copy_cmd = subparsers.add_parser("copy-sheet", help="Duplicate a sheet inside the workbook")
+    copy_cmd = subparsers.add_parser(
+        "copy-sheet", help="Duplicate a sheet inside the workbook"
+    )
     copy_cmd.add_argument("file")
     copy_cmd.add_argument("--source-sheet", required=True)
     copy_cmd.add_argument("--target-sheet", required=True)
@@ -140,10 +156,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "read-cell":
             _print_json(read_cell(args.file, sheet_name=args.sheet, address=args.cell))
         elif args.command == "cell-style":
-            _print_json(get_cell_style_info(args.file, sheet_name=args.sheet, address=args.cell))
+            _print_json(
+                get_cell_style_info(args.file, sheet_name=args.sheet, address=args.cell)
+            )
         elif args.command == "edit-cell":
             if args.value is None and not args.clear and not args.style_json:
-                parser.error("edit-cell requires at least one of --value, --clear, or --style-json")
+                parser.error(
+                    "edit-cell requires at least one of --value, --clear, or --style-json"
+                )
             _print_json(
                 edit_cell(
                     args.file,

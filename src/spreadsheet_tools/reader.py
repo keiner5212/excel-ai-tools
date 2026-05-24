@@ -4,11 +4,11 @@ from datetime import date, datetime, time
 from typing import Any
 
 from openpyxl.utils import get_column_letter
-from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from spreadsheet_tools.cleaner import (
     build_clean_row,
+    build_merge_lookup,
     drop_fully_empty_rows,
     trim_trailing_empty_columns,
     trim_trailing_empty_rows,
@@ -69,8 +69,12 @@ def workbook_info(path: str) -> dict[str, Any]:
             "properties": {
                 "title": properties.title,
                 "creator": properties.creator,
-                "created": properties.created.isoformat() if properties.created else None,
-                "modified": properties.modified.isoformat() if properties.modified else None,
+                "created": properties.created.isoformat()
+                if properties.created
+                else None,
+                "modified": properties.modified.isoformat()
+                if properties.modified
+                else None,
                 "subject": properties.subject,
                 "description": properties.description,
             },
@@ -90,7 +94,9 @@ def sheet_info(path: str, sheet_name: str | None = None) -> dict[str, Any]:
             "dimensions": sheet.dimensions,
             "max_row": sheet.max_row,
             "max_column": sheet.max_column,
-            "max_column_letter": get_column_letter(sheet.max_column) if sheet.max_column else None,
+            "max_column_letter": get_column_letter(sheet.max_column)
+            if sheet.max_column
+            else None,
             "merged_ranges": merged,
             "freeze_panes": sheet.freeze_panes,
             "auto_filter": sheet.auto_filter.ref if sheet.auto_filter else None,
@@ -125,9 +131,12 @@ def read_range(
     workbook = open_workbook(path, read_only=False, data_only=data_only)
     try:
         sheet = get_sheet(workbook, sheet_name)
+        merge_lookup = build_merge_lookup(sheet)
         rows: list[dict[str, Any]] = []
         for excel_row in range(from_row + 1, to_row + 2):
-            row_payload = build_clean_row(sheet, excel_row, from_col_idx, to_col_idx)
+            row_payload = build_clean_row(
+                sheet, excel_row, from_col_idx, to_col_idx, merge_lookup
+            )
             for cell in row_payload["cells"]:
                 cell["value"] = _serialize_value(cell["value"])
             rows.append(row_payload)
@@ -162,6 +171,7 @@ def read_range(
                 "Values only; formatting metadata excluded.",
                 "Rows are zero-based in output.",
                 "Empty rows/columns trimmed unless include_empty_rows is enabled.",
+                "Merged cells: 'master' is the top-left cell of the range (write target). 'slave' cells are non-writable; their value is always null.",
             ],
         }
     finally:
@@ -197,7 +207,11 @@ def find_values(
 ) -> dict[str, Any]:
     workbook = open_workbook(path, read_only=True)
     try:
-        sheets = [get_sheet(workbook, sheet_name)] if sheet_name else [workbook[name] for name in workbook.sheetnames]
+        sheets = (
+            [get_sheet(workbook, sheet_name)]
+            if sheet_name
+            else [workbook[name] for name in workbook.sheetnames]
+        )
         needle = query if case_sensitive else query.casefold()
         matches: list[dict[str, Any]] = []
 
