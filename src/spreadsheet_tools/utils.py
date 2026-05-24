@@ -122,12 +122,35 @@ def resolve_path(path: str) -> Path:
     return resolved
 
 
+def _close_vba_archive(workbook: Workbook) -> None:
+    """Close vba_archive if open.
+
+    openpyxl stores VBA content in an in-memory ZipFile (vba_archive). It is never
+    closed by openpyxl itself, which causes ZipFile.__del__ to fail with
+    "I/O operation on closed file" when the workbook is garbage-collected as part of
+    a reference cycle (the save-patch closure captures the workbook).
+    """
+    if workbook.vba_archive is not None:
+        try:
+            workbook.vba_archive.close()
+        except Exception:
+            pass  # already closed — ignore
+
+
 def open_workbook(
     path: str, *, read_only: bool = False, data_only: bool = True
 ) -> Workbook:
-    return load_workbook(
+    workbook = load_workbook(
         resolve_path(path), read_only=read_only, data_only=data_only, keep_vba=True
     )
+    original_close = workbook.close
+
+    def _safe_close() -> None:  # type: ignore[misc]
+        _close_vba_archive(workbook)
+        original_close()
+
+    workbook.close = _safe_close  # type: ignore[method-assign]
+    return workbook
 
 
 def _patch_workbook_save(workbook: Workbook) -> None:
@@ -139,8 +162,12 @@ def _patch_workbook_save(workbook: Workbook) -> None:
 
     BytesIO saves (used internally by safe_save_workbook itself) are left untouched
     to avoid infinite recursion.
+
+    Also wraps close() to eagerly release vba_archive before the workbook is GC'd.
+    See _close_vba_archive for the rationale.
     """
     original_save = workbook.save
+    original_close = workbook.close
 
     def _safe_save(path: str | Path | io.BytesIO) -> None:  # type: ignore[misc]
         # BytesIO path: safe_save_workbook calls this internally — pass through
@@ -149,7 +176,12 @@ def _patch_workbook_save(workbook: Workbook) -> None:
             return
         safe_save_workbook(workbook, path)
 
+    def _safe_close() -> None:  # type: ignore[misc]
+        _close_vba_archive(workbook)
+        original_close()
+
     workbook.save = _safe_save  # type: ignore[method-assign]
+    workbook.close = _safe_close  # type: ignore[method-assign]
 
 
 def open_workbook_for_write(path: str) -> Workbook:
@@ -189,6 +221,10 @@ def parse_cell_address(address: str) -> tuple[str, int]:
 
 
 def get_sheet(workbook: Workbook, sheet_name: str | None) -> Worksheet:
+    # Coerce the string literal "null" that some AI agents send when they mean
+    # to omit the parameter (FastMCP may or may not coerce it automatically).
+    if sheet_name == "null":
+        sheet_name = None
     # Check membership before access to avoid a raw KeyError from workbook[name].
     if sheet_name is not None and sheet_name not in workbook.sheetnames:
         available = ", ".join(workbook.sheetnames)

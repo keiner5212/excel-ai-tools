@@ -6,8 +6,7 @@ fixtures — all writes go through the CLI writer functions.
 """
 from __future__ import annotations
 
-import json
-import tempfile
+import gc
 from pathlib import Path
 
 import pytest
@@ -15,7 +14,9 @@ from openpyxl import Workbook, load_workbook
 
 from spreadsheet_tools.writer import (
     add_sheet,
+    batch_edit,
     batch_set_dimensions,
+    create_empty_workbook,
     format_range,
     freeze_panes,
     merge_cells,
@@ -27,7 +28,7 @@ from spreadsheet_tools.writer import (
     unfreeze_panes,
     unmerge_cells,
 )
-from spreadsheet_tools.utils import validate_cell_range, resolve_output_path
+from spreadsheet_tools.utils import validate_cell_range, resolve_output_path, open_workbook
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +284,115 @@ def test_auto_filter_clear(tmp_workbook: Path) -> None:
     assert result["auto_filter"] is None
     wb = load_workbook(tmp_workbook)
     assert wb["Sheet1"].auto_filter.ref is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: Fix 1 — create_empty_workbook returns absolute path
+# ---------------------------------------------------------------------------
+
+
+def test_create_empty_workbook_returns_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Returned 'file' path must be absolute so callers can reuse it directly."""
+    monkeypatch.chdir(tmp_path)
+    result = create_empty_workbook("report.xlsx")
+    returned_path = Path(result["file"])
+    assert returned_path.is_absolute(), "create_empty_workbook must return absolute path"
+    assert returned_path.exists()
+    assert result["sheet"] == "Sheet1"
+    assert result["created"] is True
+
+
+def test_create_empty_workbook_custom_sheet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = create_empty_workbook("out.xlsx", sheet_name="Data")
+    wb = load_workbook(result["file"])
+    assert "Data" in wb.sheetnames
+
+
+# ---------------------------------------------------------------------------
+# Regression: Fix 2 — get_sheet coerces literal "null" string to None
+# ---------------------------------------------------------------------------
+
+
+def test_get_sheet_null_string_uses_active_sheet(tmp_workbook: Path) -> None:
+    """Passing sheet_name='null' (string) must select the active sheet, not fail."""
+    from spreadsheet_tools.utils import get_sheet, open_workbook
+
+    workbook = open_workbook(str(tmp_workbook), read_only=False, data_only=False)
+    try:
+        sheet = get_sheet(workbook, "null")
+        assert sheet is not None
+        assert sheet.title == "Sheet1"
+    finally:
+        workbook.close()
+
+
+# ---------------------------------------------------------------------------
+# Regression: Fix 3 — batch_edit validates edit structure early
+# ---------------------------------------------------------------------------
+
+
+def test_batch_edit_rejects_non_dict_entry(tmp_workbook: Path) -> None:
+    """batch_edit must raise ValueError when an entry is not a dict."""
+    with pytest.raises(ValueError, match="must be a dict"):
+        batch_edit(str(tmp_workbook), edits=["A1"], sheet_name="Sheet1")  # type: ignore[list-item]
+
+
+def test_batch_edit_rejects_missing_cell_key(tmp_workbook: Path) -> None:
+    """batch_edit must raise ValueError when 'cell' key is absent."""
+    with pytest.raises(ValueError, match="missing required 'cell'"):
+        batch_edit(str(tmp_workbook), edits=[{"value": "x"}], sheet_name="Sheet1")
+
+
+def test_batch_edit_rejects_invalid_cell_address(tmp_workbook: Path) -> None:
+    """batch_edit must raise ValueError for malformed cell addresses."""
+    with pytest.raises(ValueError):
+        batch_edit(str(tmp_workbook), edits=[{"cell": "ZZ0"}], sheet_name="Sheet1")
+
+
+def test_batch_edit_applies_valid_edits(tmp_workbook: Path) -> None:
+    """batch_edit must write multiple cells atomically."""
+    result = batch_edit(
+        str(tmp_workbook),
+        edits=[{"cell": "C3", "value": "hello"}, {"cell": "D4", "value": 99}],
+        sheet_name="Sheet1",
+    )
+    assert result["saved"] is True
+    wb = load_workbook(tmp_workbook)
+    assert wb["Sheet1"]["C3"].value == "hello"
+    assert wb["Sheet1"]["D4"].value == 99
+
+
+# ---------------------------------------------------------------------------
+# Regression: Fix 4 — vba_archive ZipFile leak (PytestUnraisableExceptionWarning)
+# ---------------------------------------------------------------------------
+
+
+def test_vba_archive_closed_after_write(tmp_workbook: Path) -> None:
+    """Writer functions must leave no open ZipFile after returning.
+
+    If vba_archive is left open, GC may trigger ZipFile.__del__ with a
+    closed BytesIO, raising 'I/O operation on closed file'.
+    Running gc.collect() here with -W error would catch that regression.
+    """
+    merge_cells(str(tmp_workbook), sheet_name="Sheet1", cell_range="A1:B1")
+    gc.collect()  # triggers __del__ on any leaked ZipFile objects
+
+
+def test_vba_archive_closed_on_error_path(tmp_workbook: Path) -> None:
+    """Error paths (ValueError before save) must also close vba_archive."""
+    with pytest.raises(ValueError):
+        add_sheet(str(tmp_workbook), sheet_name="Sheet1")  # duplicate → raises
+    gc.collect()  # must not trigger ZipFile.__del__ error
+
+
+def test_open_workbook_vba_archive_closed_on_close(tmp_workbook: Path) -> None:
+    """open_workbook().close() must close vba_archive to prevent GC errors."""
+    workbook = open_workbook(str(tmp_workbook), read_only=False, data_only=False)
+    workbook.close()
+    assert workbook.vba_archive is None or workbook.vba_archive.fp is None
+    gc.collect()

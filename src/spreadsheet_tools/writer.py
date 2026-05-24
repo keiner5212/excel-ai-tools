@@ -171,10 +171,20 @@ def batch_edit(
     if not edits:
         raise ValueError("edits list is empty")
 
-    # Validate all addresses upfront so we fail early before touching the file
+    # Validate structure: each edit must be a dict with at least "cell".
+    # This catches AI JSON construction errors (e.g. un-closed nested dicts)
+    # before touching the file and surfaces a descriptive error.
     for i, edit in enumerate(edits):
+        if not isinstance(edit, dict):
+            raise ValueError(
+                f"edits[{i}] must be a dict, got {type(edit).__name__!r}. "
+                "Each edit must be: {\"cell\": \"A1\", \"value\": ..., \"style\": {...}}"
+            )
         if "cell" not in edit:
-            raise ValueError(f"edits[{i}] missing required 'cell' field")
+            raise ValueError(
+                f"edits[{i}] missing required 'cell' field. "
+                "Each edit must be: {\"cell\": \"A1\", \"value\": ..., \"style\": {...}}"
+            )
         validate_cell_address(edit["cell"])
 
     workbook = open_workbook_for_write(path)
@@ -243,13 +253,16 @@ def create_empty_workbook(path: str, sheet_name: str = "Sheet1") -> dict[str, An
     """Create new empty workbook with one sheet, overwriting existing file.
 
     Bare filenames (no directory component) are automatically placed in workspace/.
+    Always returns the absolute path so callers can reuse it without ambiguity.
     """
     resolved = resolve_output_path(path)
     workbook = Workbook()
     ws = workbook.active
+    assert ws is not None  # Workbook() always creates an active sheet
     ws.title = sheet_name
     workbook.save(resolved)
-    return {"file": str(resolved), "sheet": sheet_name, "created": True}
+    # Resolve to absolute so AI agents can reuse the returned path directly
+    return {"file": str(resolved.resolve()), "sheet": sheet_name, "created": True}
 
 
 def merge_cells(
