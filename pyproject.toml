@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "mcp>=1.27.1",
     "openpyxl>=3.1.5",
 ]
 
 [project.scripts]
 spreadsheet-tools = "spreadsheet_tools.cli:main"
+spreadsheet-tools-mcp = "spreadsheet_tools.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12.0"]
