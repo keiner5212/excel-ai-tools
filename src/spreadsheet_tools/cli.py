@@ -20,12 +20,24 @@ from spreadsheet_tools.reader import (
     workbook_info,
 )
 from spreadsheet_tools.writer import (
+    add_sheet,
     batch_edit,
+    batch_set_dimensions,
     copy_sheet_structure,
     create_empty_workbook,
     edit_cell,
     find_replace,
+    format_range,
+    freeze_panes,
     get_cell_style_info,
+    merge_cells,
+    rename_sheet,
+    set_column_width,
+    set_row_height,
+    set_tab_color,
+    toggle_auto_filter,
+    unfreeze_panes,
+    unmerge_cells,
 )
 from spreadsheet_tools.snapshot import (
     create_snapshot,
@@ -287,8 +299,135 @@ def build_parser() -> argparse.ArgumentParser:
     new_cmd = subparsers.add_parser(
         "create-empty-workbook", help="Create new empty Excel workbook"
     )
-    new_cmd.add_argument("file", help="Output path for new workbook")
+    new_cmd.add_argument(
+        "file",
+        help=(
+            "Output path. Bare filenames (no directory) are auto-placed in workspace/."
+        ),
+    )
     new_cmd.add_argument("--sheet", default="Sheet1", help="Name of the first sheet")
+
+    # --- merge-cells ---
+    merge_cmd = subparsers.add_parser(
+        "merge-cells", help="Merge a rectangular cell range"
+    )
+    merge_cmd.add_argument("file")
+    merge_cmd.add_argument("--sheet")
+    merge_cmd.add_argument(
+        "--range", dest="cell_range", required=True, metavar="RANGE",
+        help="Cell range to merge, e.g. A1:E1",
+    )
+
+    # --- unmerge-cells ---
+    unmerge_cmd = subparsers.add_parser(
+        "unmerge-cells", help="Remove merge from a cell range"
+    )
+    unmerge_cmd.add_argument("file")
+    unmerge_cmd.add_argument("--sheet")
+    unmerge_cmd.add_argument("--range", dest="cell_range", required=True, metavar="RANGE")
+
+    # --- set-column-width ---
+    colw_cmd = subparsers.add_parser(
+        "set-column-width", help="Set width of a single column"
+    )
+    colw_cmd.add_argument("file")
+    colw_cmd.add_argument("--sheet")
+    colw_cmd.add_argument("--col", required=True, help="Column letter, e.g. A")
+    colw_cmd.add_argument("--width", type=float, required=True, help="Width in Excel character units")
+
+    # --- set-row-height ---
+    rowh_cmd = subparsers.add_parser(
+        "set-row-height", help="Set height of a single row"
+    )
+    rowh_cmd.add_argument("file")
+    rowh_cmd.add_argument("--sheet")
+    rowh_cmd.add_argument("--row", type=int, required=True, help="Row number (1-based)")
+    rowh_cmd.add_argument("--height", type=float, required=True, help="Height in points")
+
+    # --- batch-set-dimensions ---
+    bsd_cmd = subparsers.add_parser(
+        "batch-set-dimensions",
+        help="Set multiple column widths and/or row heights in one save",
+    )
+    bsd_cmd.add_argument("file")
+    bsd_cmd.add_argument("--sheet")
+    bsd_cmd.add_argument(
+        "--columns-json",
+        help='JSON array of column widths, e.g. [{"col":"A","width":8}]',
+    )
+    bsd_cmd.add_argument(
+        "--rows-json",
+        help='JSON array of row heights, e.g. [{"row":1,"height":30}]',
+    )
+
+    # --- freeze-panes ---
+    freeze_cmd = subparsers.add_parser(
+        "freeze-panes", help="Freeze rows/columns at a cell"
+    )
+    freeze_cmd.add_argument("file")
+    freeze_cmd.add_argument("--sheet")
+    freeze_cmd.add_argument(
+        "--cell", required=True,
+        help="Freeze point cell, e.g. B2 freezes row 1 and col A",
+    )
+
+    # --- unfreeze-panes ---
+    unfreeze_cmd = subparsers.add_parser(
+        "unfreeze-panes", help="Remove freeze panes from a sheet"
+    )
+    unfreeze_cmd.add_argument("file")
+    unfreeze_cmd.add_argument("--sheet")
+
+    # --- add-sheet ---
+    addsh_cmd = subparsers.add_parser(
+        "add-sheet", help="Add a new empty sheet to an existing workbook"
+    )
+    addsh_cmd.add_argument("file")
+    addsh_cmd.add_argument("--sheet", required=True, help="Name for the new sheet")
+    addsh_cmd.add_argument(
+        "--position", type=int, default=None,
+        help="Zero-based sheet index (default: append at end)",
+    )
+
+    # --- rename-sheet ---
+    rensh_cmd = subparsers.add_parser("rename-sheet", help="Rename a sheet")
+    rensh_cmd.add_argument("file")
+    rensh_cmd.add_argument("--old-name", required=True, help="Current sheet name")
+    rensh_cmd.add_argument("--new-name", required=True, help="New sheet name")
+
+    # --- format-range ---
+    fmtr_cmd = subparsers.add_parser(
+        "format-range", help="Apply the same style to every master cell in a range"
+    )
+    fmtr_cmd.add_argument("file")
+    fmtr_cmd.add_argument("--sheet")
+    fmtr_cmd.add_argument("--range", dest="cell_range", required=True, metavar="RANGE")
+    fmtr_cmd.add_argument(
+        "--style-json", required=True,
+        help='Style overrides as JSON, e.g. {"font":{"bold":true},"fill":{"fill_type":"solid","start_color":"1F4E79"}}',
+    )
+
+    # --- set-tab-color ---
+    tabc_cmd = subparsers.add_parser(
+        "set-tab-color", help="Set the sheet tab color"
+    )
+    tabc_cmd.add_argument("file")
+    tabc_cmd.add_argument("--sheet")
+    tabc_cmd.add_argument(
+        "--color", required=True,
+        help="6-char RGB hex string without #, e.g. 1F4E79",
+    )
+
+    # --- auto-filter ---
+    af_cmd = subparsers.add_parser(
+        "auto-filter", help="Enable or clear auto-filter on a sheet"
+    )
+    af_cmd.add_argument("file")
+    af_cmd.add_argument("--sheet")
+    af_cmd.add_argument(
+        "--range", dest="cell_range", default=None, metavar="RANGE",
+        help="Header range for auto-filter, e.g. A8:E8. Omit to clear auto-filter.",
+    )
 
     return parser
 
@@ -462,6 +601,81 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(list_snapshots(args.file, sheet_name=args.sheet))
         elif args.command == "create-empty-workbook":
             _print_json(create_empty_workbook(args.file, sheet_name=args.sheet))
+        elif args.command == "merge-cells":
+            _print_json(
+                merge_cells(args.file, sheet_name=args.sheet, cell_range=args.cell_range)
+            )
+        elif args.command == "unmerge-cells":
+            _print_json(
+                unmerge_cells(args.file, sheet_name=args.sheet, cell_range=args.cell_range)
+            )
+        elif args.command == "set-column-width":
+            _print_json(
+                set_column_width(
+                    args.file, sheet_name=args.sheet, col=args.col, width=args.width
+                )
+            )
+        elif args.command == "set-row-height":
+            _print_json(
+                set_row_height(
+                    args.file, sheet_name=args.sheet, row=args.row, height=args.height
+                )
+            )
+        elif args.command == "batch-set-dimensions":
+            if not args.columns_json and not args.rows_json:
+                parser.error(
+                    "batch-set-dimensions requires at least --columns-json or --rows-json"
+                )
+            col_edits = json.loads(args.columns_json) if args.columns_json else None
+            row_edits = json.loads(args.rows_json) if args.rows_json else None
+            _print_json(
+                batch_set_dimensions(
+                    args.file,
+                    sheet_name=args.sheet,
+                    column_widths=col_edits,
+                    row_heights=row_edits,
+                )
+            )
+        elif args.command == "freeze-panes":
+            _print_json(
+                freeze_panes(args.file, sheet_name=args.sheet, cell=args.cell)
+            )
+        elif args.command == "unfreeze-panes":
+            _print_json(unfreeze_panes(args.file, sheet_name=args.sheet))
+        elif args.command == "add-sheet":
+            _print_json(
+                add_sheet(
+                    args.file, sheet_name=args.sheet, position=args.position
+                )
+            )
+        elif args.command == "rename-sheet":
+            _print_json(
+                rename_sheet(
+                    args.file, old_name=args.old_name, new_name=args.new_name
+                )
+            )
+        elif args.command == "format-range":
+            style = _load_json_arg(args.style_json)
+            if not style:
+                parser.error("format-range requires --style-json with at least one key")
+            _print_json(
+                format_range(
+                    args.file,
+                    sheet_name=args.sheet,
+                    cell_range=args.cell_range,
+                    style=style,
+                )
+            )
+        elif args.command == "set-tab-color":
+            _print_json(
+                set_tab_color(args.file, sheet_name=args.sheet, color=args.color)
+            )
+        elif args.command == "auto-filter":
+            _print_json(
+                toggle_auto_filter(
+                    args.file, sheet_name=args.sheet, cell_range=args.cell_range
+                )
+            )
         else:
             parser.error(f"Unknown command: {args.command}")
     except (

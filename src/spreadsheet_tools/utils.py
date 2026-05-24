@@ -19,6 +19,10 @@ from openpyxl.worksheet.worksheet import Worksheet
 COL_RE = re.compile(r"^[A-Z]+$")
 # Row 0 is invalid in Excel (1-based); [1-9]\d* rejects it at validation time.
 CELL_RE = re.compile(r"^([A-Z]+)([1-9]\d*)$")
+RANGE_RE = re.compile(r"^([A-Z]+[1-9]\d*):([A-Z]+[1-9]\d*)$")
+
+# Default workspace directory for new workbooks created without an explicit path.
+WORKSPACE_DIR_NAME = "workspace"
 
 # Shared text-analysis constants used by reader.py and rules.py
 SECTION_HEADER_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$")
@@ -77,6 +81,38 @@ def keyword_overlap_ratio(name: str, desc: str) -> float:
 _RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 ET.register_namespace("", _RELS_NS)
+
+
+def validate_cell_range(range_str: str) -> tuple[str, str]:
+    """Validate A1:B2 range notation. Returns (top_left, bottom_right) normalized.
+
+    Both endpoints must be valid cell addresses. Top-left must not be below or
+    to the right of bottom-right (Excel convention).
+    """
+    normalized = range_str.strip().upper()
+    m = RANGE_RE.match(normalized)
+    if not m:
+        raise ValueError(
+            f"Invalid cell range: {range_str!r}. Expected A1:B2 format."
+        )
+    return m.group(1), m.group(2)
+
+
+def resolve_output_path(path: str) -> Path:
+    """Route bare filenames (no directory component) to ./workspace/.
+
+    A bare filename is one whose parent is the current directory (e.g. 'file.xlsx').
+    Paths with an explicit directory component (e.g. 'subdir/file.xlsx' or
+    '/abs/path/file.xlsx') are returned unchanged.
+
+    The workspace directory is created if it does not already exist.
+    """
+    p = Path(path)
+    if p.parent == Path("."):
+        workspace = Path(WORKSPACE_DIR_NAME)
+        workspace.mkdir(exist_ok=True)
+        return workspace / p.name
+    return p
 
 
 def resolve_path(path: str) -> Path:

@@ -8,11 +8,17 @@ from openpyxl import Workbook
 from spreadsheet_tools.cleaner import build_merge_lookup
 from spreadsheet_tools.styles import apply_style_updates, get_cell_style
 from spreadsheet_tools.utils import (
+    column_to_index,
     get_sheet,
+    index_to_column,
     open_workbook,
     open_workbook_for_write,
+    parse_cell_address,
+    resolve_output_path,
     safe_save_workbook,
     validate_cell_address,
+    validate_cell_range,
+    validate_column,
 )
 
 
@@ -234,12 +240,392 @@ def batch_edit(
 
 
 def create_empty_workbook(path: str, sheet_name: str = "Sheet1") -> dict[str, Any]:
-    """Create new empty workbook with one sheet, overwriting existing file."""
+    """Create new empty workbook with one sheet, overwriting existing file.
+
+    Bare filenames (no directory component) are automatically placed in workspace/.
+    """
+    resolved = resolve_output_path(path)
     workbook = Workbook()
     ws = workbook.active
     ws.title = sheet_name
-    workbook.save(path)
-    return {"file": path, "sheet": sheet_name, "created": True}
+    workbook.save(resolved)
+    return {"file": str(resolved), "sheet": sheet_name, "created": True}
+
+
+def merge_cells(
+    path: str,
+    *,
+    sheet_name: str | None,
+    cell_range: str,
+) -> dict[str, Any]:
+    """Merge cells in a rectangular range.
+
+    The master cell (top-left) keeps its value and style. Slave cells are
+    cleared by Excel on open. Safe: uses ZIP-merge save to preserve drawings/images.
+    """
+    top_left, _ = validate_cell_range(cell_range)
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        sheet.merge_cells(cell_range.upper())
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "merged": cell_range.upper(),
+            "master": top_left,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def unmerge_cells(
+    path: str,
+    *,
+    sheet_name: str | None,
+    cell_range: str,
+) -> dict[str, Any]:
+    """Remove a merge from a cell range.
+
+    Individual cells regain independent values (previously all null except master).
+    Safe: uses ZIP-merge save.
+    """
+    validate_cell_range(cell_range)
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        sheet.unmerge_cells(cell_range.upper())
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "unmerged": cell_range.upper(),
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def set_column_width(
+    path: str,
+    *,
+    sheet_name: str | None,
+    col: str,
+    width: float,
+) -> dict[str, Any]:
+    """Set width of a single column. Width is in Excel character units."""
+    normalized_col = validate_column(col)
+    if width <= 0:
+        raise ValueError(f"Column width must be > 0, got {width}")
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        sheet.column_dimensions[normalized_col].width = width
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "column": normalized_col,
+            "width": width,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def set_row_height(
+    path: str,
+    *,
+    sheet_name: str | None,
+    row: int,
+    height: float,
+) -> dict[str, Any]:
+    """Set height of a single row. Row is 1-based (Excel row number). Height in points."""
+    if row < 1:
+        raise ValueError(f"Row number must be >= 1, got {row}")
+    if height <= 0:
+        raise ValueError(f"Row height must be > 0, got {height}")
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        sheet.row_dimensions[row].height = height
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "row": row,
+            "height": height,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def batch_set_dimensions(
+    path: str,
+    *,
+    sheet_name: str | None = None,
+    column_widths: list[dict[str, Any]] | None = None,
+    row_heights: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Set multiple column widths and/or row heights in a single save.
+
+    column_widths: list of {"col": "A", "width": 15}
+    row_heights:   list of {"row": 1, "height": 30}  (row is 1-based)
+    """
+    if not column_widths and not row_heights:
+        raise ValueError("At least one of column_widths or row_heights must be provided")
+
+    # Validate all inputs before touching the file
+    validated_cols: list[tuple[str, float]] = []
+    for item in column_widths or []:
+        col = validate_column(item["col"])
+        w = float(item["width"])
+        if w <= 0:
+            raise ValueError(f"Column width must be > 0, got {w} for col {col}")
+        validated_cols.append((col, w))
+
+    validated_rows: list[tuple[int, float]] = []
+    for item in row_heights or []:
+        row_num = int(item["row"])
+        h = float(item["height"])
+        if row_num < 1:
+            raise ValueError(f"Row number must be >= 1, got {row_num}")
+        if h <= 0:
+            raise ValueError(f"Row height must be > 0, got {h}")
+        validated_rows.append((row_num, h))
+
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        for col, width in validated_cols:
+            sheet.column_dimensions[col].width = width
+        for row_num, height in validated_rows:
+            sheet.row_dimensions[row_num].height = height
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "column_widths": [{"col": c, "width": w} for c, w in validated_cols],
+            "row_heights": [{"row": r, "height": h} for r, h in validated_rows],
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def freeze_panes(
+    path: str,
+    *,
+    sheet_name: str | None,
+    cell: str,
+) -> dict[str, Any]:
+    """Freeze rows above and columns left of the given cell.
+
+    Examples: cell=B2 freezes row 1 and column A.
+              cell=A2 freezes only row 1.
+              cell=B1 freezes only column A.
+    """
+    normalized_cell = validate_cell_address(cell)
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        sheet.freeze_panes = normalized_cell
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "freeze_panes": normalized_cell,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def unfreeze_panes(
+    path: str,
+    *,
+    sheet_name: str | None,
+) -> dict[str, Any]:
+    """Remove all freeze panes from a sheet."""
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        sheet.freeze_panes = None
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "freeze_panes": None,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def add_sheet(
+    path: str,
+    *,
+    sheet_name: str,
+    position: int | None = None,
+) -> dict[str, Any]:
+    """Add a new empty sheet to an existing workbook."""
+    workbook = open_workbook_for_write(path)
+    try:
+        if sheet_name in workbook.sheetnames:
+            raise ValueError(f"Sheet {sheet_name!r} already exists")
+        ws = workbook.create_sheet(title=sheet_name, index=position)
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": ws.title,
+            "index": workbook.sheetnames.index(ws.title),
+            "added": True,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def rename_sheet(
+    path: str,
+    *,
+    old_name: str,
+    new_name: str,
+) -> dict[str, Any]:
+    """Rename a sheet. Fails if old_name not found or new_name already taken."""
+    workbook = open_workbook_for_write(path)
+    try:
+        if old_name not in workbook.sheetnames:
+            available = ", ".join(workbook.sheetnames)
+            raise ValueError(
+                f"Sheet {old_name!r} not found. Available: {available}"
+            )
+        if new_name in workbook.sheetnames:
+            raise ValueError(f"Sheet {new_name!r} already exists")
+        workbook[old_name].title = new_name
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "old_name": old_name,
+            "new_name": new_name,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def format_range(
+    path: str,
+    *,
+    sheet_name: str | None,
+    cell_range: str,
+    style: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply the same style to every master cell in a rectangular range.
+
+    Slave cells (merged non-master cells) are skipped silently. Useful for
+    applying header colors, fonts, or number formats to entire rows/columns.
+    """
+    top_left, bottom_right = validate_cell_range(cell_range)
+    tl_col, tl_row = parse_cell_address(top_left)
+    br_col, br_row = parse_cell_address(bottom_right)
+    from_col_idx = column_to_index(tl_col)
+    to_col_idx = column_to_index(br_col)
+
+    if from_col_idx > to_col_idx or tl_row > br_row:
+        raise ValueError(
+            f"Range {cell_range!r}: top-left must be above and left of bottom-right"
+        )
+
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        merge_lookup = build_merge_lookup(sheet)
+        affected: list[str] = []
+
+        for row_num in range(tl_row, br_row + 1):
+            for col_idx in range(from_col_idx, to_col_idx + 1):
+                address = f"{index_to_column(col_idx)}{row_num}"
+                # Skip slave cells — only style master cells to avoid ghost styles
+                if address in merge_lookup:
+                    _, master = merge_lookup[address]
+                    if address != master:
+                        continue
+                apply_style_updates(sheet[address], style)
+                affected.append(address)
+
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "range": cell_range.upper(),
+            "cells_styled": len(affected),
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def set_tab_color(
+    path: str,
+    *,
+    sheet_name: str | None,
+    color: str,
+) -> dict[str, Any]:
+    """Set the sheet tab color. Color is a 6-char hex RGB string, e.g. '1F4E79'."""
+    normalized = color.strip().upper().lstrip("#")
+    if len(normalized) not in (6, 8):
+        raise ValueError(
+            f"Color must be a 6-char RGB hex (e.g. '1F4E79'), got {color!r}"
+        )
+    # Ensure ARGB format: prefix FF if only 6 chars
+    argb = normalized if len(normalized) == 8 else f"FF{normalized}"
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        sheet.sheet_properties.tabColor = argb
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "tab_color": argb,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
+
+
+def toggle_auto_filter(
+    path: str,
+    *,
+    sheet_name: str | None,
+    cell_range: str | None,
+) -> dict[str, Any]:
+    """Enable auto-filter on a range, or clear it if cell_range is None.
+
+    cell_range: e.g. 'A8:E8' — sets the auto-filter header row.
+    Pass cell_range=None to remove existing auto-filter.
+    """
+    if cell_range is not None:
+        validate_cell_range(cell_range)
+    workbook = open_workbook_for_write(path)
+    try:
+        sheet = get_sheet(workbook, sheet_name)
+        if cell_range is not None:
+            sheet.auto_filter.ref = cell_range.upper()
+        else:
+            sheet.auto_filter.ref = None
+        safe_save_workbook(workbook, path)
+        return {
+            "file": path,
+            "sheet": sheet.title,
+            "auto_filter": cell_range.upper() if cell_range else None,
+            "saved": True,
+        }
+    finally:
+        workbook.close()
 
 
 def find_replace(

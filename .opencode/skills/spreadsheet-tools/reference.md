@@ -1,5 +1,8 @@
 # Spreadsheet Tools Reference
 
+> **AGENT CONSTRAINT**: All output shapes below come from `uv run spreadsheet-tools`.
+> Never call openpyxl directly. Never create Python scripts. Use the CLI only.
+
 All commands output JSON to stdout. Errors print `error: <message>` to stderr and exit code 1.
 
 ---
@@ -654,3 +657,308 @@ All commands exit code `1` and print to stderr for:
 - `.xlsm` (VBA macros preserved via `keep_vba=True`)
 
 Legacy `.xls` is not supported.
+
+---
+
+## Structure & Formatting Commands
+
+### create-empty-workbook output
+
+```bash
+uv run spreadsheet-tools create-empty-workbook "report.xlsx" --sheet "Data"
+```
+
+```json
+{
+  "file": "workspace/report.xlsx",
+  "sheet": "Data",
+  "created": true
+}
+```
+
+**Notes:**
+- Bare filenames (no directory) are auto-placed in `workspace/` (created if absent).
+- Explicit paths like `"subdir/file.xlsx"` are used as-is.
+
+---
+
+### merge-cells output
+
+```bash
+uv run spreadsheet-tools merge-cells "file.xlsx" --sheet "Sheet1" --range A1:E1
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "merged": "A1:E1",
+  "master": "A1",
+  "saved": true
+}
+```
+
+**Notes:**
+- Master cell (top-left) retains its value and style.
+- Slave cells (B1:E1) are cleared by Excel on open.
+- Verify result with `sheet-info` → `merged_ranges`.
+
+---
+
+### unmerge-cells output
+
+```bash
+uv run spreadsheet-tools unmerge-cells "file.xlsx" --sheet "Sheet1" --range A1:E1
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "unmerged": "A1:E1",
+  "saved": true
+}
+```
+
+---
+
+### set-column-width output
+
+```bash
+uv run spreadsheet-tools set-column-width "file.xlsx" --sheet "Sheet1" --col B --width 20
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "column": "B",
+  "width": 20.0,
+  "saved": true
+}
+```
+
+---
+
+### set-row-height output
+
+```bash
+uv run spreadsheet-tools set-row-height "file.xlsx" --sheet "Sheet1" --row 1 --height 40
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "row": 1,
+  "height": 40.0,
+  "saved": true
+}
+```
+
+**Notes:**
+- `--row` is **1-based** (Excel row number, NOT zero-based).
+- Height is in points (Excel default is 15).
+
+---
+
+### batch-set-dimensions output
+
+```bash
+uv run spreadsheet-tools batch-set-dimensions "file.xlsx" \
+  --sheet "Sheet1" \
+  --columns-json '[{"col":"A","width":8},{"col":"B","width":15}]' \
+  --rows-json '[{"row":1,"height":40},{"row":8,"height":25}]'
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "column_widths": [
+    {"col": "A", "width": 8.0},
+    {"col": "B", "width": 15.0}
+  ],
+  "row_heights": [
+    {"row": 1, "height": 40.0},
+    {"row": 8, "height": 25.0}
+  ],
+  "saved": true
+}
+```
+
+**Notes:**
+- `row` in `--rows-json` is **1-based**.
+- At least one of `--columns-json` or `--rows-json` is required.
+- One save for all changes — use this instead of repeated `set-column-width` calls.
+
+---
+
+### freeze-panes output
+
+```bash
+uv run spreadsheet-tools freeze-panes "file.xlsx" --sheet "Sheet1" --cell B2
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "freeze_panes": "B2",
+  "saved": true
+}
+```
+
+**Notes:**
+- `B2` freezes row 1 (above B2) and column A (left of B2).
+- `A2` freezes only row 1.
+- `B1` freezes only column A.
+
+---
+
+### unfreeze-panes output
+
+```bash
+uv run spreadsheet-tools unfreeze-panes "file.xlsx" --sheet "Sheet1"
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "freeze_panes": null,
+  "saved": true
+}
+```
+
+---
+
+### add-sheet output
+
+```bash
+uv run spreadsheet-tools add-sheet "file.xlsx" --sheet "Summary" --position 0
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Summary",
+  "index": 0,
+  "added": true,
+  "saved": true
+}
+```
+
+**Notes:**
+- Fails with error if sheet name already exists.
+- `--position` is zero-based; omit to append at end.
+
+---
+
+### rename-sheet output
+
+```bash
+uv run spreadsheet-tools rename-sheet "file.xlsx" --old-name "Sheet1" --new-name "Amortización"
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "old_name": "Sheet1",
+  "new_name": "Amortización",
+  "saved": true
+}
+```
+
+---
+
+### format-range output
+
+```bash
+uv run spreadsheet-tools format-range "file.xlsx" --sheet "Sheet1" \
+  --range A8:E8 \
+  --style-json '{"font":{"bold":true,"color":"FFFFFF"},"fill":{"fill_type":"solid","start_color":"1F4E79"}}'
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "range": "A8:E8",
+  "cells_styled": 5,
+  "saved": true
+}
+```
+
+**Notes:**
+- Only master cells are styled; slave cells are silently skipped.
+- `cells_styled` reports exactly how many cells received the style.
+- `--style-json` uses the same format as `edit-cell --style-json`.
+
+---
+
+### set-tab-color output
+
+```bash
+uv run spreadsheet-tools set-tab-color "file.xlsx" --sheet "Sheet1" --color "1F4E79"
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "tab_color": "FF1F4E79",
+  "saved": true
+}
+```
+
+**Notes:**
+- Color stored as ARGB (8 chars): 6-char RGB input is auto-prefixed with `FF`.
+- Leading `#` is stripped automatically.
+
+---
+
+### auto-filter output
+
+#### Enable
+
+```bash
+uv run spreadsheet-tools auto-filter "file.xlsx" --sheet "Sheet1" --range A8:E8
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "auto_filter": "A8:E8",
+  "saved": true
+}
+```
+
+#### Clear (omit --range)
+
+```bash
+uv run spreadsheet-tools auto-filter "file.xlsx" --sheet "Sheet1"
+```
+
+```json
+{
+  "file": "file.xlsx",
+  "sheet": "Sheet1",
+  "auto_filter": null,
+  "saved": true
+}
+```
+
+---
+
+## Error Handling (new commands)
+
+All new commands follow the same exit-code-1 + stderr pattern:
+- Invalid range: `error: Invalid cell range: 'A1'. Expected A1:B2 format.`
+- Invalid column: `error: Invalid column letter: '1A'`
+- Row < 1: `error: Row number must be >= 1, got 0`
+- Width/height ≤ 0: `error: Column width must be > 0, got 0`
+- Sheet exists on add: `error: Sheet 'Name' already exists`
+- Sheet not found on rename: `error: Sheet 'X' not found. Available: Sheet1, Sheet2`
+- Color invalid: `error: Color must be a 6-char RGB hex (e.g. '1F4E79'), got 'ZZZ'`
