@@ -94,8 +94,32 @@ def open_workbook(
     )
 
 
+def _patch_workbook_save(workbook: Workbook) -> None:
+    """Replace workbook.save with a safe version that preserves all embedded content.
+
+    openpyxl's native save strips xl/media/, drawings, ActiveX, and VML objects.
+    This patch intercepts file-path saves and routes them through safe_save_workbook,
+    which merges the openpyxl output with the original ZIP at the binary level.
+
+    BytesIO saves (used internally by safe_save_workbook itself) are left untouched
+    to avoid infinite recursion.
+    """
+    original_save = workbook.save
+
+    def _safe_save(path: str | Path | io.BytesIO) -> None:  # type: ignore[misc]
+        # BytesIO path: safe_save_workbook calls this internally — pass through
+        if isinstance(path, io.BytesIO):
+            original_save(path)
+            return
+        safe_save_workbook(workbook, path)
+
+    workbook.save = _safe_save  # type: ignore[method-assign]
+
+
 def open_workbook_for_write(path: str) -> Workbook:
-    return load_workbook(resolve_path(path), data_only=False, keep_vba=True)
+    workbook = load_workbook(resolve_path(path), data_only=False, keep_vba=True)
+    _patch_workbook_save(workbook)
+    return workbook
 
 
 def validate_column(column: str) -> str:
