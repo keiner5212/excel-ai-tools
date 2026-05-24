@@ -144,6 +144,9 @@ def _parse_color(value: str | None) -> str | None:
     normalized = value.strip().upper()
     if normalized.startswith("#"):
         normalized = normalized[1:]
+    # Expand 3-char shorthand #RGB -> RRGGBB before prefix check.
+    if len(normalized) == 3:
+        normalized = "".join(c * 2 for c in normalized)
     if normalized.startswith("FF") and len(normalized) == 8:
         return normalized
     if len(normalized) == 6:
@@ -151,10 +154,16 @@ def _parse_color(value: str | None) -> str | None:
     return normalized
 
 
+_SENTINEL = object()
+
+
 def apply_style_updates(cell: Any, style: dict[str, Any]) -> None:
     if "font" in style and isinstance(style["font"], dict):
         font_data = style["font"]
         current = cell.font
+        # Use a sentinel to distinguish "key absent" (keep current) from
+        # "key present with None/falsy value" (reset to default).
+        color_input = font_data.get("color", _SENTINEL)
         cell.font = Font(
             name=font_data.get("name", current.name),
             size=font_data.get("size", current.size),
@@ -162,8 +171,8 @@ def apply_style_updates(cell: Any, style: dict[str, Any]) -> None:
             italic=font_data.get("italic", current.italic),
             underline=font_data.get("underline", current.underline),
             strike=font_data.get("strike", current.strike),
-            color=_parse_color(font_data.get("color"))
-            if font_data.get("color")
+            color=_parse_color(color_input)  # type: ignore[arg-type]
+            if color_input is not _SENTINEL
             else current.color,
         )
 

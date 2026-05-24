@@ -37,12 +37,12 @@ def list_sheets(path: str) -> dict[str, Any]:
     try:
         active = workbook.active.title if workbook.active else None
         sheets = []
-        for name in workbook.sheetnames:
+        for idx, name in enumerate(workbook.sheetnames):
             sheet = workbook[name]
             sheets.append(
                 {
                     "name": name,
-                    "index": workbook.sheetnames.index(name),
+                    "index": idx,
                     "state": sheet.sheet_state,
                 }
             )
@@ -99,7 +99,7 @@ def sheet_info(path: str, sheet_name: str | None = None) -> dict[str, Any]:
             else None,
             "merged_ranges": merged,
             "freeze_panes": sheet.freeze_panes,
-            "auto_filter": sheet.auto_filter.ref if sheet.auto_filter else None,
+            "auto_filter": sheet.auto_filter.ref,
         }
     finally:
         workbook.close()
@@ -142,10 +142,10 @@ def read_range(
             rows.append(row_payload)
 
         if trim_empty:
+            rows = trim_trailing_empty_columns(rows)
             if not include_empty_rows:
                 rows = drop_fully_empty_rows(rows)
-            rows = trim_trailing_empty_rows(rows)
-            rows = trim_trailing_empty_columns(rows)
+                rows = trim_trailing_empty_rows(rows)
 
         merged_in_range = _merged_ranges_in_area(
             sheet,
@@ -230,6 +230,14 @@ def find_values(
                     haystack = str(value)
                     compare = haystack if case_sensitive else haystack.casefold()
                     if needle in compare:
+                        if len(matches) >= max_results:
+                            return {
+                                "file": path,
+                                "query": query,
+                                "match_count": len(matches),
+                                "truncated": True,
+                                "matches": matches,
+                            }
                         match: dict[str, Any] = {
                             "sheet": sheet.title,
                             "address": cell.coordinate,
@@ -244,14 +252,6 @@ def find_values(
                                 "master": master,
                             }
                         matches.append(match)
-                        if len(matches) >= max_results:
-                            return {
-                                "file": path,
-                                "query": query,
-                                "match_count": len(matches),
-                                "truncated": True,
-                                "matches": matches,
-                            }
 
         return {
             "file": path,
@@ -265,7 +265,8 @@ def find_values(
 
 
 def read_cell(path: str, *, sheet_name: str | None, address: str) -> dict[str, Any]:
-    workbook = open_workbook(path, read_only=True)
+    # read_only=True uses ReadOnlyWorksheet which doesn't support sheet[addr] access.
+    workbook = open_workbook(path, read_only=False, data_only=True)
     try:
         sheet = get_sheet(workbook, sheet_name)
         cell = sheet[address.upper()]

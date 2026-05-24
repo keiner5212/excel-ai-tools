@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+import warnings
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -12,10 +13,18 @@ from xml.etree import ElementTree as ET
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.workbook.workbook import Workbook
+from openpyxl.worksheet._read_only import ReadOnlyWorksheet
 from openpyxl.worksheet.worksheet import Worksheet
 
 COL_RE = re.compile(r"^[A-Z]+$")
-CELL_RE = re.compile(r"^([A-Z]+)(\d+)$")
+# Row 0 is invalid in Excel (1-based); [1-9]\d* rejects it at validation time.
+CELL_RE = re.compile(r"^([A-Z]+)([1-9]\d*)$")
+
+# Register XML namespaces once at import time (module-level side effect is safe;
+# repeated calls from multiple threads would corrupt the global namespace registry).
+_RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+ET.register_namespace("", _RELS_NS)
 
 
 def resolve_path(path: str) -> Path:
@@ -68,17 +77,18 @@ def parse_cell_address(address: str) -> tuple[str, int]:
 
 
 def get_sheet(workbook: Workbook, sheet_name: str | None) -> Worksheet:
-    sheet = workbook.active if sheet_name is None else workbook[sheet_name]
-    if sheet is None:
-        raise ValueError("No active sheet found in workbook")
+    # Check membership before access to avoid a raw KeyError from workbook[name].
     if sheet_name is not None and sheet_name not in workbook.sheetnames:
         available = ", ".join(workbook.sheetnames)
         raise ValueError(f"Sheet {sheet_name!r} not found. Available: {available}")
-    if not isinstance(sheet, Worksheet):
+    sheet = workbook.active if sheet_name is None else workbook[sheet_name]
+    if sheet is None:
+        raise ValueError("No active sheet found in workbook")
+    if not isinstance(sheet, (Worksheet, ReadOnlyWorksheet)):
         raise ValueError(
             f"Sheet {sheet_name!r} is not a worksheet (may be a chart sheet)"
         )
-    return sheet
+    return sheet  # type: ignore[return-value]
 
 
 def normalize_scalar(value: object) -> object | None:
@@ -103,9 +113,7 @@ def _merge_rels(
     not already present. Used for workbook.xml.rels because openpyxl renumbers
     rIds in workbook.xml, so the rels must match openpyxl's numbering scheme.
     """
-    RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
-    ET.register_namespace("", RELS_NS)
-    tag = f"{{{RELS_NS}}}Relationship"
+    tag = f"{{{_RELS_NS}}}Relationship"
 
     orig_root = ET.fromstring(orig_data)
     new_root = ET.fromstring(new_data)
@@ -136,10 +144,8 @@ def _merge_content_types(orig_data: bytes, new_data: bytes) -> bytes:
     from openpyxl (e.g. a newly added sheet). This ensures that files
     restored from the original ZIP still have registered content types.
     """
-    CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
-    ET.register_namespace("", CT_NS)
-    default_tag = f"{{{CT_NS}}}Default"
-    override_tag = f"{{{CT_NS}}}Override"
+    default_tag = f"{{{_CT_NS}}}Default"
+    override_tag = f"{{{_CT_NS}}}Override"
 
     orig_root = ET.fromstring(orig_data)
     new_root = ET.fromstring(new_data)
@@ -213,7 +219,11 @@ def _inject_drawing_elements(new_xml: bytes, elements: list[str]) -> bytes:
     # Tags where at most one element per sheet is allowed (openpyxl already wrote one)
     _SINGLE_INSTANCE_TAGS = {"legacyDrawing", "picture"}
     existing_tags = set(re.findall(rf"<({tag_pattern})[\s/>]", text))
-    existing_rids = set(re.findall(rf'(?:{tag_pattern})\s+[^>]*r:id="([^"]+)"', text))
+    # Support both single- and double-quoted r:id attributes to avoid
+    # duplicate injection when the original XML used single quotes.
+    existing_rids = set(
+        re.findall(rf"""(?:{tag_pattern})\s+[^>]*r:id=["']([^"']+)["']""", text)
+    )
 
     to_inject = []
     for snippet in elements:
@@ -224,7 +234,7 @@ def _inject_drawing_elements(new_xml: bytes, elements: list[str]) -> bytes:
         # Skip if this single-instance tag is already present in new XML
         if tag in _SINGLE_INSTANCE_TAGS and tag in existing_tags:
             continue
-        rid_match = re.search(r'r:id="([^"]+)"', snippet)
+        rid_match = re.search(r"""r:id=["']([^"']+)["']""", snippet)
         rid = rid_match.group(1) if rid_match else None
         if rid is None or rid not in existing_rids:
             to_inject.append(snippet)
@@ -288,8 +298,12 @@ def _merge_workbook_zips(
                         # openpyxl drops <drawing>, <legacyDrawing>, <picture>
                         # elements from sheet XML; restore them from the original.
                         data = _patch_worksheet_xml(orig_zip.read(name), data)
-                except Exception:
-                    pass  # fall back to openpyxl's version on parse error
+                except Exception as exc:
+                    warnings.warn(
+                        f"Failed to merge ZIP entry {name!r}: {exc}. "
+                        "Falling back to openpyxl's version; some content may be lost.",
+                        stacklevel=3,
+                    )
             out_zip.writestr(new_zip.getinfo(name), data)
 
         # Restore entries openpyxl dropped entirely
@@ -327,6 +341,11 @@ def safe_save_workbook(workbook: Workbook, path: str | Path) -> None:
         tmp_path = Path(tmp_path_str)
         _merge_workbook_zips(target, buf, tmp_path)
         os.replace(tmp_path, target)
+        # Clean up backup only after successful atomic replace.
+        try:
+            backup.unlink()
+        except OSError:
+            pass  # non-critical; stale .bak is harmless
     except Exception:
         try:
             os.unlink(tmp_path_str)

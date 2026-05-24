@@ -54,7 +54,9 @@ def trim_trailing_empty_columns(rows: list[dict[str, Any]]) -> list[dict[str, An
             last_content_col = col_idx
 
     if last_content_col == -1:
-        return []
+        # All columns empty: preserve row structure with empty cell lists
+        # so callers retain row-count and row-index information.
+        return [{**row, "cells": []} for row in rows]
 
     trimmed_rows: list[dict[str, Any]] = []
     for row in rows:

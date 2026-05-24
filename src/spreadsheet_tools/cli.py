@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
+import zipfile
 from typing import Any
 
 from spreadsheet_tools.reader import (
@@ -26,13 +28,20 @@ def _coerce_value(raw: str) -> object:
     This prevents numeric data from being stored as text in Excel,
     which would break formulas and sorting. Booleans are kept as strings
     because "TRUE"/"FALSE" are ambiguous across locales.
+
+    nan and inf are rejected as strings to avoid writing XML-invalid float
+    values that corrupt the workbook.
     """
     try:
         return int(raw)
     except ValueError:
         pass
     try:
-        return float(raw)
+        v = float(raw)
+        if math.isnan(v) or math.isinf(v):
+            # nan/inf are not valid xs:double in OOXML; store as plain string.
+            return raw
+        return v
     except ValueError:
         pass
     return raw
@@ -214,8 +223,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             parser.error(f"Unknown command: {args.command}")
-            return 2
-    except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
+    except (
+        ValueError,
+        KeyError,
+        FileNotFoundError,
+        PermissionError,
+        AttributeError,
+        zipfile.BadZipFile,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
