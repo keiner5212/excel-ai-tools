@@ -5,14 +5,11 @@ description: >-
   with cleaned value-only reads and explicit style metadata commands. Use when
   working with spreadsheets, Excel files, .xlsx, .xlsm, sheet ranges, cell edits,
   or workbook inspection.
-allowed-tools: Bash(export *) Bash(uv *) Bash(uv run *) Bash(uv sync *)
 ---
 
 # Spreadsheet Tools
 
 Local CLI for AI-friendly Excel interaction. Always run from the repo root.
-
-Invoke manually with `/spreadsheet-tools` or let Claude load this skill when spreadsheet work is detected.
 
 ## ⚠ CRITICAL — AI AGENT RULES (NO EXCEPTIONS)
 
@@ -91,7 +88,7 @@ When exploring and filling a structured Excel form:
 2. `sheet-info` → see dimensions + all merged ranges + freeze panes
 3. `section-map` → find section headers (`N.N.N Title`) + row ranges
 4. `read-range` → inspect cell values for a specific section
-5. `audit-range` �� find all empty master cells before bulk filling
+5. `audit-range` → find all empty master cells before bulk filling
 6. `snapshot` with `--tag before` → safety snapshot before edits
 7. `batch-edit` → fill multiple cells in one save (preferred over repeated `edit-cell`)
 8. `describe-section` → verify strategy table consistency (name ↔ description)
