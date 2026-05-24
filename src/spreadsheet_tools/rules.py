@@ -6,7 +6,7 @@ from typing import Any
 
 from openpyxl.utils import column_index_from_string, get_column_letter
 
-from spreadsheet_tools.utils import GENERIC_NAME_RE, STOPWORDS, keyword_overlap_ratio
+from spreadsheet_tools.utils import GENERIC_NAME_RE, keyword_overlap_ratio
 
 _CELL_ADDR_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import date, datetime, time
 from typing import Any
 
@@ -17,7 +16,6 @@ from spreadsheet_tools.cleaner import (
 from spreadsheet_tools.utils import (
     GENERIC_NAME_RE,
     SECTION_HEADER_RE,
-    STOPWORDS,
     column_to_index,
     get_sheet,
     index_to_column,
