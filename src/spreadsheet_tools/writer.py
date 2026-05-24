@@ -315,7 +315,9 @@ def find_replace(
     for m in matches:
         if use_regex:
             # re.sub requires string operands; result is always str
-            new_val: Any = re.sub(query, str(replace_with), str(m["value"]), flags=flags)
+            new_val: Any = re.sub(
+                query, str(replace_with), str(m["value"]), flags=flags
+            )
         else:
             # Preserve the caller's type (int, float, str, …)
             new_val = replace_with

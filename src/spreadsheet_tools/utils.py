@@ -23,11 +23,38 @@ CELL_RE = re.compile(r"^([A-Z]+)([1-9]\d*)$")
 # Shared text-analysis constants used by reader.py and rules.py
 SECTION_HEADER_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$")
 GENERIC_NAME_RE = re.compile(r"^Estrategia\s+de\s+\w+\s+\d+$", re.IGNORECASE)
-STOPWORDS: frozenset[str] = frozenset({
-    "de", "la", "el", "en", "y", "para", "con", "del", "los", "las",
-    "que", "un", "una", "a", "e", "o", "al", "se", "su", "sus",
-    "and", "the", "of", "in", "to", "for", "with", "an",
-})
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        "de",
+        "la",
+        "el",
+        "en",
+        "y",
+        "para",
+        "con",
+        "del",
+        "los",
+        "las",
+        "que",
+        "un",
+        "una",
+        "a",
+        "e",
+        "o",
+        "al",
+        "se",
+        "su",
+        "sus",
+        "and",
+        "the",
+        "of",
+        "in",
+        "to",
+        "for",
+        "with",
+        "an",
+    }
+)
 
 
 def keyword_overlap_ratio(name: str, desc: str) -> float:
@@ -43,6 +70,7 @@ def keyword_overlap_ratio(name: str, desc: str) -> float:
     desc_lower = desc.lower()
     matched = sum(1 for kw in name_kw if kw in desc_lower)
     return matched / len(name_kw)
+
 
 # Register XML namespaces once at import time (module-level side effect is safe;
 # repeated calls from multiple threads would corrupt the global namespace registry).

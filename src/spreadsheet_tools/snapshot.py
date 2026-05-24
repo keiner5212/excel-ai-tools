@@ -15,9 +15,9 @@ from spreadsheet_tools.utils import get_sheet, open_workbook
 def _snapshot_dir(abs_file: Path, sheet_name: str) -> Path:
     """Return (and create) the snapshot directory for a file + sheet pair."""
     file_hash = hashlib.sha1(str(abs_file).encode()).hexdigest()[:16]
-    safe_sheet = "".join(
-        c if (c.isalnum() or c in "_- ") else "_" for c in sheet_name
-    )[:50]
+    safe_sheet = "".join(c if (c.isalnum() or c in "_- ") else "_" for c in sheet_name)[
+        :50
+    ]
     base = (
         Path.home()
         / ".cache"

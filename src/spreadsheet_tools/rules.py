@@ -50,9 +50,7 @@ def _resolve_address(address: str, merge_lookup: MergeLookup) -> str:
     return address
 
 
-def _cell_value(
-    sheet: Any, address: str, merge_lookup: MergeLookup
-) -> object | None:
+def _cell_value(sheet: Any, address: str, merge_lookup: MergeLookup) -> object | None:
     """Read cell value, resolving merged-cell slaves to their master.
 
     Slave cells always have value=None in openpyxl; the actual value lives
@@ -114,7 +112,7 @@ def apply_rule(
         return _cell_value(sheet, addr.upper(), lookup)
 
     if stripped.startswith("not-empty:"):
-        addr = stripped[len("not-empty:"):].strip().upper()
+        addr = stripped[len("not-empty:") :].strip().upper()
         val = _val(addr)
         passed = not _is_empty(val)
         return RuleResult(
@@ -240,7 +238,7 @@ def apply_rule(
         )
 
     if stripped.startswith("no-generic-name:"):
-        addr = stripped[len("no-generic-name:"):].strip().upper()
+        addr = stripped[len("no-generic-name:") :].strip().upper()
         val = _val(addr)
         val_str = str(val) if val else ""
         is_generic = bool(GENERIC_NAME_RE.match(val_str))

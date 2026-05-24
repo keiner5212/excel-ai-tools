@@ -25,7 +25,6 @@ from spreadsheet_tools.utils import (
 )
 
 
-
 def _serialize_value(value: object | None) -> object | None:
     if isinstance(value, datetime):
         return value.isoformat()
@@ -299,7 +298,9 @@ def section_map(
     workbook = open_workbook(path, read_only=False, data_only=True)
     try:
         sheet = get_sheet(workbook, sheet_name)
-        effective_max = max_row if max_row is not None else max((sheet.max_row or 1) - 1, 0)
+        effective_max = (
+            max_row if max_row is not None else max((sheet.max_row or 1) - 1, 0)
+        )
 
         sections: list[dict[str, Any]] = []
 
@@ -331,8 +332,14 @@ def section_map(
 
         # Assign end rows: each section ends one row before the next header
         for i, sec in enumerate(sections):
-            next_start = sections[i + 1]["header_row"] if i < len(sections) - 1 else effective_max
-            sec["row_range"]["to"] = next_start - 1 if i < len(sections) - 1 else effective_max
+            next_start = (
+                sections[i + 1]["header_row"]
+                if i < len(sections) - 1
+                else effective_max
+            )
+            sec["row_range"]["to"] = (
+                next_start - 1 if i < len(sections) - 1 else effective_max
+            )
 
         return {
             "file": path,
@@ -385,7 +392,9 @@ def audit_range(
             for col_idx in range(from_col_idx, to_col_idx + 1):
                 column = index_to_column(col_idx)
                 address = f"{column}{excel_row}"
-                value = _serialize_value(sheet.cell(row=excel_row, column=col_idx).value)
+                value = _serialize_value(
+                    sheet.cell(row=excel_row, column=col_idx).value
+                )
 
                 is_master = True
                 merge_info: dict[str, Any] | None = None
@@ -396,7 +405,9 @@ def audit_range(
                     is_master = role == "master"
                     merge_info = {"range": range_str, "role": role, "master": master}
 
-                is_empty = value is None or (isinstance(value, str) and not value.strip())
+                is_empty = value is None or (
+                    isinstance(value, str) and not value.strip()
+                )
 
                 if is_master:
                     total_master += 1
@@ -501,7 +512,11 @@ def describe_section(
 
             issues: list[dict[str, Any]] = []
 
-            if name_val and isinstance(name_val, str) and GENERIC_NAME_RE.match(name_val):
+            if (
+                name_val
+                and isinstance(name_val, str)
+                and GENERIC_NAME_RE.match(name_val)
+            ):
                 issues.append(
                     {
                         "severity": "warning",

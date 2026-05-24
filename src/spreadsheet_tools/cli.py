@@ -171,7 +171,10 @@ def build_parser() -> argparse.ArgumentParser:
     smap_cmd.add_argument("--sheet")
     smap_cmd.add_argument("--min-row", type=int, default=0, help="Zero-based start row")
     smap_cmd.add_argument(
-        "--max-row", type=int, default=None, help="Zero-based end row (default: sheet max)"
+        "--max-row",
+        type=int,
+        default=None,
+        help="Zero-based end row (default: sheet max)",
     )
 
     # --- audit-range ---
@@ -250,12 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
     batch_cmd.add_argument("file")
     batch_cmd.add_argument("--sheet")
     _batch_src = batch_cmd.add_mutually_exclusive_group(required=True)
-    _batch_src.add_argument(
-        "--edits-file", help="Path to JSON file with edits array"
-    )
-    _batch_src.add_argument(
-        "--edits-json", help="Inline JSON edits array"
-    )
+    _batch_src.add_argument("--edits-file", help="Path to JSON file with edits array")
+    _batch_src.add_argument("--edits-json", help="Inline JSON edits array")
     batch_cmd.add_argument("--dry-run", action="store_true")
 
     # --- snapshot ---
