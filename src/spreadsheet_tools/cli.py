@@ -395,16 +395,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "find-replace":
-            replace_val = (
-                _coerce_value(args.replace_with)
-                if args.replace_with is not None
-                else None
-            )
             _print_json(
                 find_replace(
                     args.file,
                     query=args.query,
-                    replace_with=str(replace_val) if replace_val is not None else None,
+                    replace_with=_coerce_value(args.replace_with)
+                    if args.replace_with is not None
+                    else None,
                     sheet_name=args.sheet,
                     case_sensitive=args.case_sensitive,
                     use_regex=args.regex,

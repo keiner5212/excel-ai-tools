@@ -6,14 +6,12 @@ from typing import Any
 
 from openpyxl.utils import column_index_from_string, get_column_letter
 
-_STOPWORDS = frozenset({
-    "de", "la", "el", "en", "y", "para", "con", "del", "los", "las",
-    "que", "un", "una", "a", "e", "o", "al", "se", "su", "sus",
-    "and", "the", "of", "in", "to", "for", "with", "an",
-})
+from spreadsheet_tools.utils import GENERIC_NAME_RE, STOPWORDS, keyword_overlap_ratio
 
-_GENERIC_NAME_RE = re.compile(r"^Estrategia\s+de\s+\w+\s+\d+$", re.IGNORECASE)
 _CELL_ADDR_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
+
+# Type alias used throughout this module
+MergeLookup = dict[str, tuple[str, str]]
 
 
 @dataclass
@@ -44,9 +42,26 @@ def _cells_in_range(from_addr: str, to_addr: str) -> list[str]:
     ]
 
 
-def _cell_value(sheet: Any, address: str) -> object | None:
+def _resolve_address(address: str, merge_lookup: MergeLookup) -> str:
+    """Redirect a slave cell to its merge master; return unchanged if not a slave."""
+    if address in merge_lookup:
+        _range_str, master = merge_lookup[address]
+        return master
+    return address
+
+
+def _cell_value(
+    sheet: Any, address: str, merge_lookup: MergeLookup
+) -> object | None:
+    """Read cell value, resolving merged-cell slaves to their master.
+
+    Slave cells always have value=None in openpyxl; the actual value lives
+    on the master.  Without this redirect every rule applied to a slave
+    address would incorrectly see an empty cell.
+    """
+    effective = _resolve_address(address, merge_lookup)
     try:
-        return sheet[address.upper()].value
+        return sheet[effective].value
     except Exception:
         return None
 
@@ -59,35 +74,48 @@ def _is_empty(value: object | None) -> bool:
     return False
 
 
-def _keyword_overlap_ratio(name: str, desc: str) -> float:
-    """Fraction of meaningful name tokens found in description text."""
-    name_tokens = {w.lower() for w in re.split(r"\W+", name) if len(w) > 2}
-    name_kw = name_tokens - _STOPWORDS
-    if not name_kw:
-        # no meaningful tokens → cannot detect mismatch
-        return 1.0
-    desc_lower = desc.lower()
-    matched = sum(1 for kw in name_kw if kw in desc_lower)
-    return matched / len(name_kw)
-
-
-def apply_rule(rule_text: str, sheet: Any) -> RuleResult:
+def apply_rule(
+    rule_text: str,
+    sheet: Any,
+    merge_lookup: MergeLookup | None = None,
+) -> RuleResult:
     """Parse and evaluate one validation rule against a worksheet.
 
     Rule syntax (colon-separated):
+
       not-empty:CELL
+        Cell must have a non-blank value.
+
       not-empty-range:FROM_CELL:TO_CELL
+        Every cell in the rectangular range must be non-blank.
+
       price-min-max:MIN_CELL:MAX_CELL
+        MIN < MAX (both must be numeric).
+
       name-matches-desc:NAME_CELL:DESC_CELL
+        Keyword overlap between name and description must be >= 30%.
+
       numeric-range:CELL:MIN:MAX
+        Cell value must satisfy MIN <= value <= MAX.
+
       string-contains:CELL:SUBSTRING
+        Cell string value must contain SUBSTRING (case-insensitive).
+
       no-generic-name:CELL
+        Cell value must NOT match the pattern 'Estrategia de X N'.
+
+    All rules correctly handle merged cells: slave addresses are
+    transparently redirected to their merge master.
     """
+    lookup: MergeLookup = merge_lookup or {}
     stripped = rule_text.strip()
+
+    def _val(addr: str) -> object | None:
+        return _cell_value(sheet, addr.upper(), lookup)
 
     if stripped.startswith("not-empty:"):
         addr = stripped[len("not-empty:"):].strip().upper()
-        val = _cell_value(sheet, addr)
+        val = _val(addr)
         passed = not _is_empty(val)
         return RuleResult(
             rule=rule_text,
@@ -100,7 +128,8 @@ def apply_rule(rule_text: str, sheet: Any) -> RuleResult:
         _, _, range_part = stripped.partition(":")
         from_addr, _, to_addr = range_part.partition(":")
         cells = _cells_in_range(from_addr.strip(), to_addr.strip())
-        empty = [a for a in cells if _is_empty(_cell_value(sheet, a))]
+        # Resolve each address through the merge lookup before checking
+        empty = [a for a in cells if _is_empty(_val(a))]
         passed = len(empty) == 0
         return RuleResult(
             rule=rule_text,
@@ -118,8 +147,8 @@ def apply_rule(rule_text: str, sheet: Any) -> RuleResult:
         min_addr, _, max_addr = args.partition(":")
         min_addr = min_addr.strip().upper()
         max_addr = max_addr.strip().upper()
-        min_val = _cell_value(sheet, min_addr)
-        max_val = _cell_value(sheet, max_addr)
+        min_val = _val(min_addr)
+        max_val = _val(max_addr)
         try:
             passed = float(min_val) < float(max_val)  # type: ignore[arg-type]
         except (TypeError, ValueError):
@@ -140,26 +169,28 @@ def apply_rule(rule_text: str, sheet: Any) -> RuleResult:
         name_addr, _, desc_addr = args.partition(":")
         name_addr = name_addr.strip().upper()
         desc_addr = desc_addr.strip().upper()
-        name_val = _cell_value(sheet, name_addr)
-        desc_val = _cell_value(sheet, desc_addr)
+        name_val = _val(name_addr)
+        desc_val = _val(desc_addr)
         if not name_val or not desc_val:
-            passed = False
-            msg = f"Cannot check: {name_addr}={name_val!r}, {desc_addr}={desc_val!r}"
-        else:
-            ratio = _keyword_overlap_ratio(str(name_val), str(desc_val))
-            passed = ratio >= 0.3
-            msg = (
+            return RuleResult(
+                rule=rule_text,
+                passed=False,
+                message=f"Cannot check: {name_addr}={name_val!r}, {desc_addr}={desc_val!r}",
+                addresses=[name_addr, desc_addr],
+            )
+        ratio = keyword_overlap_ratio(str(name_val), str(desc_val))
+        passed = ratio >= 0.3
+        return RuleResult(
+            rule=rule_text,
+            passed=passed,
+            message=(
                 f"Keyword overlap {ratio:.0%}"
                 if passed
                 else (
                     f"Mismatch: {name_addr}={name_val!r} not reflected in "
                     f"{desc_addr} (overlap {ratio:.0%})"
                 )
-            )
-        return RuleResult(
-            rule=rule_text,
-            passed=passed,
-            message=msg,
+            ),
             addresses=[name_addr, desc_addr],
         )
 
@@ -170,7 +201,7 @@ def apply_rule(rule_text: str, sheet: Any) -> RuleResult:
         addr = parts[1].strip().upper()
         min_bound = float(parts[2].strip())
         max_bound = float(parts[3].strip())
-        val = _cell_value(sheet, addr)
+        val = _val(addr)
         try:
             passed = min_bound <= float(val) <= max_bound  # type: ignore[arg-type]
         except (TypeError, ValueError):
@@ -194,7 +225,7 @@ def apply_rule(rule_text: str, sheet: Any) -> RuleResult:
             )
         addr = parts[1].strip().upper()
         substring = parts[2]
-        val = _cell_value(sheet, addr)
+        val = _val(addr)
         val_str = str(val) if val is not None else ""
         passed = substring.lower() in val_str.lower()
         return RuleResult(
@@ -210,9 +241,9 @@ def apply_rule(rule_text: str, sheet: Any) -> RuleResult:
 
     if stripped.startswith("no-generic-name:"):
         addr = stripped[len("no-generic-name:"):].strip().upper()
-        val = _cell_value(sheet, addr)
+        val = _val(addr)
         val_str = str(val) if val else ""
-        is_generic = bool(_GENERIC_NAME_RE.match(val_str))
+        is_generic = bool(GENERIC_NAME_RE.match(val_str))
         passed = not is_generic
         return RuleResult(
             rule=rule_text,

@@ -235,7 +235,7 @@ def find_replace(
     path: str,
     *,
     query: str,
-    replace_with: str | None = None,
+    replace_with: Any = None,
     sheet_name: str | None = None,
     case_sensitive: bool = False,
     use_regex: bool = False,
@@ -244,8 +244,14 @@ def find_replace(
 ) -> dict[str, Any]:
     """Search cell values and optionally replace matches.
 
-    Matching is exact-value by default (the entire cell value must equal the
-    query string).  Pass ``use_regex=True`` for substring/regex matching.
+    Default matching is exact-value: the entire string representation of the
+    cell value must equal the query.  Pass ``use_regex=True`` for
+    substring/pattern matching (``re.search``); replacement is then applied
+    via ``re.sub`` on the string representation.
+
+    ``replace_with`` accepts any Python value (int, float, str).  Numeric
+    values are stored as numbers in Excel, not text.  When ``use_regex=True``
+    the replacement is forced to str (required by ``re.sub``).
 
     Two-pass approach: read pass collects matches with data_only=True (computed
     values); write pass applies replacements using a separate workbook load.
@@ -308,8 +314,10 @@ def find_replace(
     replacements: list[dict[str, Any]] = []
     for m in matches:
         if use_regex:
-            new_val: Any = re.sub(query, replace_with, str(m["value"]), flags=flags)
+            # re.sub requires string operands; result is always str
+            new_val: Any = re.sub(query, str(replace_with), str(m["value"]), flags=flags)
         else:
+            # Preserve the caller's type (int, float, str, …)
             new_val = replace_with
         replacements.append(
             {

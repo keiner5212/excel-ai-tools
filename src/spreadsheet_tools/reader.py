@@ -15,33 +15,17 @@ from spreadsheet_tools.cleaner import (
     trim_trailing_empty_rows,
 )
 from spreadsheet_tools.utils import (
+    GENERIC_NAME_RE,
+    SECTION_HEADER_RE,
+    STOPWORDS,
     column_to_index,
     get_sheet,
     index_to_column,
+    keyword_overlap_ratio,
     normalize_scalar,
     open_workbook,
 )
 
-_SECTION_HEADER_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$")
-
-_STOPWORDS = frozenset({
-    "de", "la", "el", "en", "y", "para", "con", "del", "los", "las",
-    "que", "un", "una", "a", "e", "o", "al", "se", "su", "sus",
-    "and", "the", "of", "in", "to", "for", "with", "an",
-})
-
-_GENERIC_NAME_RE = re.compile(r"^Estrategia\s+de\s+\w+\s+\d+$", re.IGNORECASE)
-
-
-def _keyword_overlap_ratio(name: str, desc: str) -> float:
-    """Fraction of meaningful name tokens present in description text."""
-    name_tokens = {w.lower() for w in re.split(r"\W+", name) if len(w) > 2}
-    name_kw = name_tokens - _STOPWORDS
-    if not name_kw:
-        return 1.0
-    desc_lower = desc.lower()
-    matched = sum(1 for kw in name_kw if kw in desc_lower)
-    return matched / len(name_kw)
 
 
 def _serialize_value(value: object | None) -> object | None:
@@ -317,7 +301,7 @@ def section_map(
     workbook = open_workbook(path, read_only=False, data_only=True)
     try:
         sheet = get_sheet(workbook, sheet_name)
-        effective_max = max_row if max_row is not None else (sheet.max_row or 0) - 1
+        effective_max = max_row if max_row is not None else max((sheet.max_row or 1) - 1, 0)
 
         sections: list[dict[str, Any]] = []
 
@@ -328,7 +312,7 @@ def section_map(
                 if not (raw and isinstance(raw, str)):
                     continue
                 text = raw.strip()
-                m = _SECTION_HEADER_RE.match(text)
+                m = SECTION_HEADER_RE.match(text)
                 if not m:
                     continue
                 prefix = m.group(1).rstrip(".")
@@ -519,7 +503,7 @@ def describe_section(
 
             issues: list[dict[str, Any]] = []
 
-            if name_val and isinstance(name_val, str) and _GENERIC_NAME_RE.match(name_val):
+            if name_val and isinstance(name_val, str) and GENERIC_NAME_RE.match(name_val):
                 issues.append(
                     {
                         "severity": "warning",
@@ -548,7 +532,7 @@ def describe_section(
                 and isinstance(name_val, str)
                 and isinstance(desc_val, str)
             ):
-                ratio = _keyword_overlap_ratio(name_val, desc_val)
+                ratio = keyword_overlap_ratio(name_val, desc_val)
                 if ratio < 0.3:
                     issues.append(
                         {
@@ -626,9 +610,11 @@ def validate_rules(
     workbook = open_workbook(path, read_only=False, data_only=True)
     try:
         sheet = get_sheet(workbook, sheet_name)
+        # Build merge lookup once; passed to every rule so slave cells resolve correctly
+        merge_lookup = build_merge_lookup(sheet)
         results: list[dict[str, Any]] = []
         for rule_text in rules:
-            result = apply_rule(rule_text, sheet)
+            result = apply_rule(rule_text, sheet, merge_lookup)
             results.append(
                 {
                     "rule": result.rule,

@@ -20,6 +20,30 @@ COL_RE = re.compile(r"^[A-Z]+$")
 # Row 0 is invalid in Excel (1-based); [1-9]\d* rejects it at validation time.
 CELL_RE = re.compile(r"^([A-Z]+)([1-9]\d*)$")
 
+# Shared text-analysis constants used by reader.py and rules.py
+SECTION_HEADER_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$")
+GENERIC_NAME_RE = re.compile(r"^Estrategia\s+de\s+\w+\s+\d+$", re.IGNORECASE)
+STOPWORDS: frozenset[str] = frozenset({
+    "de", "la", "el", "en", "y", "para", "con", "del", "los", "las",
+    "que", "un", "una", "a", "e", "o", "al", "se", "su", "sus",
+    "and", "the", "of", "in", "to", "for", "with", "an",
+})
+
+
+def keyword_overlap_ratio(name: str, desc: str) -> float:
+    """Fraction of meaningful name tokens (len > 2, not stopwords) found in desc.
+
+    Returns 1.0 when the name has no meaningful tokens (cannot detect mismatch).
+    Used by describe-section and validate name-matches-desc rule.
+    """
+    name_tokens = {w.lower() for w in re.split(r"\W+", name) if len(w) > 2}
+    name_kw = name_tokens - STOPWORDS
+    if not name_kw:
+        return 1.0
+    desc_lower = desc.lower()
+    matched = sum(1 for kw in name_kw if kw in desc_lower)
+    return matched / len(name_kw)
+
 # Register XML namespaces once at import time (module-level side effect is safe;
 # repeated calls from multiple threads would corrupt the global namespace registry).
 _RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
