@@ -178,10 +178,14 @@ def apply_style_updates(cell: Any, style: dict[str, Any]) -> None:
 
     if "fill" in style and isinstance(style["fill"], dict):
         fill_data = style["fill"]
+        current_fill = cell.fill
+        current_type = getattr(current_fill, "fill_type", None) or "solid"
+        current_start = _color_to_str(getattr(current_fill, "start_color", None))
+        current_end = _color_to_str(getattr(current_fill, "end_color", None))
         cell.fill = PatternFill(
-            fill_type=fill_data.get("fill_type", "solid"),
-            start_color=_parse_color(fill_data.get("start_color")),
-            end_color=_parse_color(fill_data.get("end_color")),
+            fill_type=fill_data.get("fill_type", current_type),
+            start_color=_parse_color(fill_data.get("start_color", current_start)),
+            end_color=_parse_color(fill_data.get("end_color", current_end)),
         )
 
     if "alignment" in style and isinstance(style["alignment"], dict):
