@@ -1,0 +1,57 @@
+name: Bug report
+description: Report incorrect or unexpected behavior
+labels: ["bug"]
+assignees: ["keinerdeveloper"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Author / maintainer:** Keiner Alvarado. Fill every field to help reproduce the issue.
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: Exact command (sanitize sensitive paths).
+      placeholder: "uv run spreadsheet-tools read-range workbook.xlsx --from-col A --to-col Z --from-row 0 --to-row 100"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / error
+      description: Include the full stderr output.
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.13.2"
+    validations:
+      required: true
+
+  - type: input
+    id: uv
+    attributes:
+      label: uv version
+      placeholder: "0.6.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 24.04 / macOS 15 / Windows 11"
+    validations:
+      required: true

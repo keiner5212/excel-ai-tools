@@ -81,12 +81,16 @@ def normalize_scalar(value: object) -> object | None:
     return value
 
 
-def _merge_rels(orig_data: bytes, new_data: bytes) -> bytes:
+def _merge_rels(orig_data: bytes, new_data: bytes, *, prefer_new: bool = False) -> bytes:
     """Merge two .rels XML files.
 
-    Keeps every Relationship from the original (drawing refs, hyperlinks, etc.)
-    and appends any new ones from openpyxl that have a different Id.
-    This prevents openpyxl from silently dropping references it didn't model.
+    Default (prefer_new=False): starts from original, appends any new entries
+    from openpyxl that have a different Id. Used for worksheet rels to preserve
+    drawing/hyperlink references openpyxl drops.
+
+    prefer_new=True: starts from openpyxl's version, appends any original entries
+    not already present. Used for workbook.xml.rels because openpyxl renumbers
+    rIds in workbook.xml, so the rels must match openpyxl's numbering scheme.
     """
     RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
     ET.register_namespace("", RELS_NS)
@@ -95,12 +99,19 @@ def _merge_rels(orig_data: bytes, new_data: bytes) -> bytes:
     orig_root = ET.fromstring(orig_data)
     new_root = ET.fromstring(new_data)
 
-    orig_ids = {el.get("Id") for el in orig_root.iter(tag)}
-    for el in new_root.iter(tag):
-        if el.get("Id") not in orig_ids:
-            orig_root.append(el)
+    if prefer_new:
+        base_root = new_root
+        extra_root = orig_root
+    else:
+        base_root = orig_root
+        extra_root = new_root
 
-    xml_str = ET.tostring(orig_root, encoding="unicode")
+    base_ids = {el.get("Id") for el in base_root.iter(tag)}
+    for el in extra_root.iter(tag):
+        if el.get("Id") not in base_ids:
+            base_root.append(el)
+
+    xml_str = ET.tostring(base_root, encoding="unicode")
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_str).encode("utf-8")
 
 
@@ -162,7 +173,13 @@ def _merge_workbook_zips(original_path: Path, new_buf: io.BytesIO, out_path: Pat
                     if name == "[Content_Types].xml":
                         data = _merge_content_types(orig_zip.read(name), data)
                     elif name.endswith(".rels"):
-                        data = _merge_rels(orig_zip.read(name), data)
+                        # workbook.xml.rels must use openpyxl's rId numbering as
+                        # the base because openpyxl rewrites workbook.xml with new
+                        # rIds. Using the original as base would map those new rIds
+                        # to wrong targets (theme, styles, vbaProject instead of
+                        # the actual worksheet files).
+                        prefer_new = name == "xl/_rels/workbook.xml.rels"
+                        data = _merge_rels(orig_zip.read(name), data, prefer_new=prefer_new)
                 except Exception:
                     pass  # fall back to openpyxl's version on parse error
             out_zip.writestr(new_zip.getinfo(name), data)

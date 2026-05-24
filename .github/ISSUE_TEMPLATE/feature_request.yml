@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a new command, flag, or behavior
+labels: ["enhancement"]
+assignees: ["keinerdeveloper"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Author / maintainer:** Keiner Alvarado.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What can you not do today? Link related issues if any.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the command, flag, or API change you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about and why they fall short.
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example usage
+      description: Show the CLI invocation and expected JSON output.
+      render: bash

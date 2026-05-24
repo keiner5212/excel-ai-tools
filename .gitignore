@@ -31,3 +31,6 @@ output/
 
 # ignore all md files (except README.md)
 *.md
+
+# ignore all .bak files
+*.bak
