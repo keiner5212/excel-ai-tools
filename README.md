@@ -110,10 +110,6 @@ Agent skill files are included for major AI coding tools:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
-
 ## License
 
 MIT © [Keiner Alvarado](https://github.com/keinerdeveloper)
