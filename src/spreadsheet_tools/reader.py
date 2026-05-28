@@ -94,7 +94,12 @@ def sheet_info(path: str, sheet_name: str | None = None) -> dict[str, Any]:
         return {
             "file": path,
             "sheet": sheet.title,
-            "dimensions": sheet.dimensions,
+            "dimensions": {
+                "min_row": sheet.min_row or 1,
+                "max_row": sheet.max_row or 1,
+                "min_col": get_column_letter(sheet.min_column) if sheet.min_column else "A",
+                "max_col": get_column_letter(sheet.max_column) if sheet.max_column else "A",
+            },
             "max_row": sheet.max_row,
             "max_column": sheet.max_column,
             "max_column_letter": get_column_letter(sheet.max_column)
@@ -267,9 +272,11 @@ def find_values(
         workbook.close()
 
 
-def read_cell(path: str, *, sheet_name: str | None, address: str) -> dict[str, Any]:
+def read_cell(
+    path: str, *, sheet_name: str | None, address: str, include_formulas: bool = False
+) -> dict[str, Any]:
     # read_only=True uses ReadOnlyWorksheet which doesn't support sheet[addr] access.
-    workbook = open_workbook(path, read_only=False, data_only=True)
+    workbook = open_workbook(path, read_only=False, data_only=not include_formulas)
     try:
         sheet = get_sheet(workbook, sheet_name)
         cell = sheet[address.upper()]

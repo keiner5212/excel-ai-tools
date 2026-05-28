@@ -47,15 +47,17 @@ from spreadsheet_tools.snapshot import (
 
 
 def _coerce_value(raw: str) -> object:
-    """Coerce a CLI string value to int, float, or str.
+    """Coerce a CLI string value to bool, int, float, or str.
 
     This prevents numeric data from being stored as text in Excel,
-    which would break formulas and sorting. Booleans are kept as strings
-    because "TRUE"/"FALSE" are ambiguous across locales.
+    which would break formulas and sorting.
 
     nan and inf are rejected as strings to avoid writing XML-invalid float
     values that corrupt the workbook.
     """
+    lowered = raw.lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
     try:
         return int(raw)
     except ValueError:
@@ -63,7 +65,6 @@ def _coerce_value(raw: str) -> object:
     try:
         v = float(raw)
         if math.isnan(v) or math.isinf(v):
-            # nan/inf are not valid xs:double in OOXML; store as plain string.
             return raw
         return v
     except ValueError:
@@ -139,6 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
     cell_cmd.add_argument("file")
     cell_cmd.add_argument("--sheet")
     cell_cmd.add_argument("--cell", required=True)
+    cell_cmd.add_argument(
+        "--include-formulas",
+        action="store_true",
+        help="Return formula text instead of computed value",
+    )
 
     style_cmd = subparsers.add_parser("cell-style", help="Read one cell style metadata")
     style_cmd.add_argument("file")
@@ -473,7 +479,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "read-cell":
-            _print_json(read_cell(args.file, sheet_name=args.sheet, address=args.cell))
+            _print_json(
+                read_cell(
+                    args.file,
+                    sheet_name=args.sheet,
+                    address=args.cell,
+                    include_formulas=args.include_formulas,
+                )
+            )
         elif args.command == "cell-style":
             _print_json(
                 get_cell_style_info(args.file, sheet_name=args.sheet, address=args.cell)

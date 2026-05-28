@@ -131,9 +131,17 @@ If redirected from slave to master:
 {
   "file": "workbook.xlsm",
   "sheet": "Sheet1",
-  "dimensions": {"min_row": 1, "max_row": 400, "min_col": "A", "max_col": "L"},
+  "dimensions": {
+    "min_row": 1,
+    "max_row": 400,
+    "min_col": "A",
+    "max_col": "L"
+  },
+  "max_row": 400,
+  "max_column": 12,
+  "max_column_letter": "L",
   "merged_ranges": ["B3:E3", "D271:L271", "F308:H308"],
-  "merged_range_count": 3,
+  "freeze_panes": null,
   "auto_filter": null
 }
 ```

@@ -191,6 +191,26 @@ def batch_edit(
     try:
         sheet = get_sheet(workbook, sheet_name)
         merge_lookup = build_merge_lookup(sheet)
+        # Detect duplicate cell addresses — only last write wins, which is silently
+        # confusing for AI-generated edit lists.
+        seen: dict[str, int] = {}
+        for i, edit in enumerate(edits):
+            addr_key = validate_cell_address(edit["cell"])
+            seen.setdefault(addr_key, i)
+
+        dupes = [addr for addr, first_i in seen.items() if first_i != edits.index(next(e for e in edits if validate_cell_address(e["cell"]) == addr))]
+        # Simpler approach: flag any address that appears more than once
+        addr_counts: dict[str, int] = {}
+        for edit in edits:
+            addr = validate_cell_address(edit["cell"])
+            addr_counts[addr] = addr_counts.get(addr, 0) + 1
+        duplicate_warnings: list[str] = []
+        for addr, count in addr_counts.items():
+            if count > 1:
+                duplicate_warnings.append(
+                    f"{addr} appears {count} times — only the last value will be written"
+                )
+
         applied: list[dict[str, Any]] = []
 
         for edit in edits:
@@ -221,9 +241,10 @@ def batch_edit(
                 apply_style_updates(cell, style)
 
             entry: dict[str, Any] = {
-                "cell": edit["cell"],
-                "effective_address": effective_addr,
-                "new_value": _serialize_value(cell.value),
+                "address": edit["cell"],
+                "resolved_address": effective_addr,
+                "value": _serialize_value(cell.value),
+                "cleared": clear,
                 "style_changed": bool(style),
             }
             if warning:
@@ -233,10 +254,12 @@ def batch_edit(
         result: dict[str, Any] = {
             "file": path,
             "sheet": sheet.title,
-            "applied": len(applied),
             "dry_run": dry_run,
-            "cells": applied,
+            "applied": applied,
+            "total_applied": len(applied),
         }
+        if duplicate_warnings:
+            result["warnings"] = duplicate_warnings
 
         if not dry_run:
             safe_save_workbook(workbook, path)

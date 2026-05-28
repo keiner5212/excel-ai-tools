@@ -52,6 +52,10 @@ uv run spreadsheet-tools <command> [args...]
    Call `sheet_info` to see all merged ranges before editing.
 7. **New workbooks**: pass any path to `create_empty_workbook`. Bare filenames
    (no `/`) go to `workspace/` automatically, but any absolute or relative path works.
+8. **Formula cells**: by default, reads return cached computed values (`None` if no cache).
+   Use `--include-formulas` (CLI) or `include_formulas=True` (MCP) to get formula text
+   like `=SUM(A1,A2)` instead of the computed result. This is essential when the
+   workbook has never been opened in Excel or was saved with recalculation disabled.
 
 ---
 
@@ -67,8 +71,8 @@ uv run spreadsheet-tools <command> [args...]
 ### Reads
 | Tool | What it does |
 |------|-------------|
-| `read_range(file, from_col, to_col, from_row, to_row, sheet?, ...)` | Read rectangular range — values only, zero-based rows |
-| `read_cell(file, cell, sheet?)` | Read single cell value |
+| `read_range(file, from_col, to_col, from_row, to_row, sheet?, include_formulas?)` | Read rectangular range — values only (or formula text with `include_formulas`), zero-based rows |
+| `read_cell(file, cell, sheet?, include_formulas?)` | Read single cell value (or formula text with `include_formulas`) |
 | `cell_style(file, cell, sheet?)` | Read cell style metadata (font, fill, alignment, etc.) |
 
 ### Search
