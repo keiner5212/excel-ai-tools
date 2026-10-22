@@ -30,6 +30,8 @@ IMPORTANT FOR AI AGENTS
 
 from __future__ import annotations
 
+from functools import wraps
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -46,6 +48,7 @@ from spreadsheet_tools.reader import (
     validate_rules as _validate_rules,
     workbook_info as _workbook_info,
 )
+from spreadsheet_tools.render import render
 from spreadsheet_tools.snapshot import (
     create_snapshot as _create_snapshot,
     diff_snapshots as _diff_snapshots,
@@ -72,8 +75,17 @@ from spreadsheet_tools.writer import (
     unmerge_cells as _unmerge_cells,
 )
 
+
+def package_version() -> str:
+    try:
+        return version("spreadsheet-tools")
+    except PackageNotFoundError:
+        return "0.2.0"
+
+
 mcp = MCPServer(
     "spreadsheet-tools",
+    version=package_version(),
     instructions=(
         "Excel (.xlsx/.xlsm) read/write tools. "
         "NEVER use Python scripts or import openpyxl — use these tools exclusively. "
@@ -83,9 +95,32 @@ mcp = MCPServer(
         "but any absolute or relative path works, and missing parent dirs are created. "
         "Row indices for read_range/audit_range/section_map are ZERO-BASED (Excel row 1 = 0). "
         "Row numbers for set_row_height/batch_set_dimensions are 1-BASED (Excel row number). "
-        "Columns are always Excel letters (A, B, ...), never numeric indices."
+        "Columns are always Excel letters (A, B, ...), never numeric indices. "
+        "describe_section and validate are for Spanish strategy tables "
+        "(name, description, cost). Do not use them on unrelated sheets. "
+        "Every tool result is TOON text, not JSON. "
+        "Snapshot files on disk are JSON under ~/.cache/spreadsheet-tools/snapshots, not inside the xlsx. "
+        "They store cached values, so a formula just written may snapshot as null."
     ),
 )
+
+_register_tool = mcp.tool
+
+
+def _tool(*args, **kwargs):
+    kwargs["structured_output"] = False
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*fn_args, **fn_kwargs):
+            return render(fn(*fn_args, **fn_kwargs))
+
+        return _register_tool(*args, **kwargs)(wrapped)
+
+    return decorator
+
+
+mcp.tool = _tool
 
 
 # ---------------------------------------------------------------------------

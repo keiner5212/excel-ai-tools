@@ -2,7 +2,7 @@
   "mcpServers": {
     "spreadsheet-tools": {
       "type": "stdio",
-      "command": "/home/keiner5212/DATA/proyectos-personales/excel/dist/spreadsheet-tools-linux-x86_64"
+      "command": "/absolute/path/to/spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64"
     }
   }
 }

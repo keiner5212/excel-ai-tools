@@ -36,16 +36,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bin=(dist/spreadsheet-tools-*)
-          test -f "${bin[0]}"
-          "${bin[0]}" --help
-          "${bin[0]}" create-empty-workbook "${RUNNER_TEMP}/smoke.xlsx" --sheet Data
+          bin="$(find dist -type f -name 'spreadsheet-tools-*' ! -path '*/_internal/*' ! -name '*.zip' | head -n 1)"
+          test -n "$bin"
+          test -f "$bin"
+          "$bin" --help
+          "$bin" create-empty-workbook "${RUNNER_TEMP}/smoke.xlsx" --sheet Data
           test -f "${RUNNER_TEMP}/smoke.xlsx"
 
       - uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.os }}
-          path: dist/spreadsheet-tools-*
+          path: dist/*.zip
           if-no-files-found: error
 
   release:
@@ -72,8 +73,8 @@ jobs:
           set -euo pipefail
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)"
           tag="v${version}"
-          notes="Standalone binaries. Pick the file for your OS. No Python or uv install. spreadsheet-tools-skill.zip is the agent skill."
-          mapfile -t files < <(find dist -type f \( -name 'spreadsheet-tools-*' -o -name 'spreadsheet-tools-skill.zip' \))
+          notes="Unzip the archive for your OS and point the MCP command at the executable inside it. Nothing is unpacked into /tmp. spreadsheet-tools-skill.zip is the agent skill."
+          mapfile -t files < <(find dist -type f -name '*.zip')
           test "${#files[@]}" -gt 0
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber

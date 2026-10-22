@@ -1,118 +1,76 @@
 # spreadsheet-tools
 
+Version 0.2.0.
+
 [![Python](https://img.shields.io/badge/python-%3E%3D3.13-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![uv](https://img.shields.io/badge/managed%20by-uv-purple)](https://github.com/astral-sh/uv)
 
-AI-friendly Excel (`.xlsx` / `.xlsm`) tools. Exposes 31 operations as **MCP tools** (primary) and as a **CLI** (fallback). Designed to give language models clean, token-efficient access to spreadsheet data — value-only reads, explicit style metadata, and safe cell edits with ZIP-merge save (preserves images, drawings, VBA macros).
+Excel (`.xlsx` / `.xlsm`) tools for an agent. 31 operations, exposed as MCP tools. Reads return values, not a dump of the file. Writes go through one save, and a failed save leaves the previous file in place.
 
-## For AI Agents
+## Install
 
-**Use the MCP server — no shell scripting needed.**
+Download the archive for your OS. No Python install. Steps, skill folder, and the MCP `command` path: [setup/INSTALL.md](setup/INSTALL.md).
 
-When the `spreadsheet-tools` MCP server is connected, call tools directly:
+The download is a folder. Point the agent at the executable inside it. The program does not unpack into `/tmp`.
 
-```python
-# Create a workbook at any path
-create_empty_workbook(filename="/tmp/report.xlsx", sheet="Data")
+Copy `setup/spreadsheet-tools/` into the agent's skills directory. The agent does not read it from this repo.
 
-# Populate cells atomically (preferred over repeated single edits)
-batch_edit(
-    file="/tmp/report.xlsx",
-    sheet="Data",
-    edits=[
-        {"cell": "A1", "value": "Name", "style": {"font": {"bold": True}}},
-        {"cell": "B1", "value": "Amount"},
-        {"cell": "A2", "value": "Acme Corp"},
-        {"cell": "B2", "value": 150000},
-    ]
-)
-
-# Style header row
-format_range(file="/tmp/report.xlsx", sheet="Data", cell_range="A1:B1",
-             style={"fill": {"fill_type": "solid", "start_color": "1F4E79"},
-                    "font": {"color": "FFFFFF", "bold": True}})
-
-# Freeze header and read back to verify
-freeze_panes(file="/tmp/report.xlsx", sheet="Data", cell="A2")
-read_range(file="/tmp/report.xlsx", sheet="Data",
-           from_col="A", to_col="B", from_row=0, to_row=5)
-```
-
-See `setup/spreadsheet-tools/SKILL.md` for the complete tool reference.
-
-## Requirements
-
-- Python ≥ 3.13
-- [`uv`](https://github.com/astral-sh/uv)
-
-## Setup
-
-Step by step: [setup/INSTALL.md](setup/INSTALL.md). Download one standalone binary for your OS (no Python, no uv), or install from source. Copy the skill folder into the agent's skills directory either way.
-
-```bash
-git clone https://github.com/keinerdeveloper/spreadsheet-tools.git
-cd spreadsheet-tools
-uv sync
-```
+Building from source is in that same install page.
 
 ## MCP
 
-`setup/mcp.json` is the client config. Copy it into the agent, global or per-project. `uv run --project` loads this repo and does not change the working directory, so the config file can live anywhere.
+`setup/mcp.json` is a template. The path in it is a placeholder, not a file on any one computer. Copy the `spreadsheet-tools` entry into the agent and set `command` to the executable on your machine. The install page lists where that config file goes for each agent.
 
-File arguments are normal paths. An absolute path or `~/...` edits that workbook wherever it is. A bare filename still lands in `workspace/` next to the client working directory. `create_empty_workbook` creates missing parent directories.
+Paths are normal filesystem paths.
 
-If this clone is not at the path inside `setup/mcp.json`, change the `--project` argument.
+- An absolute path or `~/...` edits that workbook.
+- A path with a directory is relative to the client working directory.
+- A bare filename (`report.xlsx`) goes to `workspace/` next to the client working directory.
+- `create_empty_workbook` creates missing parent directories. Its path argument is `filename`.
 
-## CLI Usage (Fallback)
+`read_range`, `audit_range`, and `section_map` use zero-based rows (Excel row 1 is `0`). Cell addresses, `set_row_height`, and `batch_set_dimensions` row heights use Excel's 1-based numbers. Columns are letters.
 
-When MCP is not available, every operation is accessible via CLI. Each tool maps
-1:1 to a command (underscores → hyphens):
+A string that starts with `=` is a formula (`"=E2*F2"`). Pass numbers as numbers. `read_range` returns the cached value. A formula just written is null until Excel calculates it. `include_formulas=true` returns the formula text.
 
-```bash
-# List sheets
-uv run spreadsheet-tools list-sheets "workbook.xlsm"
+`section_map`, `describe_section`, and `validate` are for Spanish strategy tables (numbered headers, name, description, cost). Do not use them on a normal sheet.
 
-# Read a range (rows are zero-based)
-uv run spreadsheet-tools read-range "workbook.xlsm" \
-  --sheet "Sheet1" --from-col A --to-col L --from-row 0 --to-row 20
+Tool list and TOON result shapes: `setup/spreadsheet-tools/SKILL.md` and `setup/spreadsheet-tools/reference.md`. Tool results are TOON text, not JSON.
 
-# Edit a single cell
-uv run spreadsheet-tools edit-cell "workbook.xlsm" --sheet "Sheet1" --cell B5 --value "Hello"
+Example:
 
-# Bulk edit (atomic, single save)
-uv run spreadsheet-tools batch-edit "workbook.xlsm" --sheet "Sheet1" \
-  --edits-json '[{"cell":"D5","value":"Hello"},{"cell":"E5","value":42}]'
-
-# Create new workbook (bare filename → workspace/)
-uv run spreadsheet-tools create-empty-workbook "report.xlsx" --sheet "Data"
-
-# Search
-uv run spreadsheet-tools find "workbook.xlsm" --query "total" --max-results 20
-
-# Workbook / sheet metadata
-uv run spreadsheet-tools workbook-info "workbook.xlsm"
-uv run spreadsheet-tools sheet-info "workbook.xlsm" --sheet "Sheet1"
+```text
+create_empty_workbook(filename="/tmp/report.xlsx", sheet="Data")
+batch_edit(file="/tmp/report.xlsx", sheet="Data", edits=[
+  {"cell": "A1", "value": "Name"},
+  {"cell": "B2", "value": 150000},
+  {"cell": "C2", "value": "=B2*2"}
+])
+read_range(file="/tmp/report.xlsx", sheet="Data", from_col="A", to_col="C", from_row=0, to_row=1, include_formulas=true)
 ```
 
-Full command list: `uv run spreadsheet-tools --help`
+## CLI
 
-## AI Agent Integration
+The same executable is the CLI. No arguments in a terminal prints help. An agent that launches it with a pipe starts the MCP server.
 
-One skill: `setup/spreadsheet-tools/`. Agents do not read it there. Copy the folder into the agent's skills directory. Paths are in [setup/INSTALL.md](setup/INSTALL.md).
+```bash
+./spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64 list-sheets "/path/book.xlsx"
+./spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64 read-range "/path/book.xlsx" --sheet Data --from-col A --to-col C --from-row 0 --to-row 10
+./spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64 --help
+```
 
-## Available Tools (31 total)
+Use the folder name for your OS. Mac and Windows names are in the install page.
+
+## Tools
 
 | Category | Tools |
-|----------|-------|
+| --- | --- |
 | Discovery | `list_sheets`, `workbook_info`, `sheet_info` |
 | Reads | `read_range`, `read_cell`, `cell_style` |
 | Search | `find`, `find_replace` |
 | Analysis | `section_map`, `audit_range`, `describe_section`, `validate` |
-| Write (single) | `edit_cell` |
-| Write (bulk) | `batch_edit`, `batch_set_dimensions` |
+| Write | `edit_cell`, `batch_edit`, `batch_set_dimensions` |
 | Formatting | `merge_cells`, `unmerge_cells`, `set_column_width`, `set_row_height`, `format_range`, `freeze_panes`, `unfreeze_panes`, `set_tab_color`, `auto_filter` |
-| Sheet mgmt | `add_sheet`, `rename_sheet`, `copy_sheet` |
+| Sheets | `add_sheet`, `rename_sheet`, `copy_sheet` |
 | Create | `create_empty_workbook` |
 | Snapshots | `snapshot`, `snapshot_diff`, `list_snapshots` |
 
@@ -122,4 +80,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT © [Keiner Alvarado](https://github.com/keinerdeveloper)
+MIT (c) [Keiner Alvarado](https://github.com/keinerdeveloper)

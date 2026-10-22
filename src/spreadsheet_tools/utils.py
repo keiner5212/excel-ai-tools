@@ -5,6 +5,7 @@ import os
 import posixpath
 import re
 import shutil
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -788,6 +789,16 @@ def _merge_workbook_zips(
     _write_zip(final, out_path)
 
 
+def _warn_if_external_lock(target: Path) -> None:
+    """ONLYOFFICE and LibreOffice drop a lock file next to an open workbook."""
+    lock = target.parent / f".~lock.{target.name}#"
+    if lock.is_file():
+        print(
+            f"spreadsheet-tools: {lock} exists. Another application may have this workbook open.",
+            file=sys.stderr,
+        )
+
+
 def safe_save_workbook(workbook: Workbook, path: str | Path) -> None:
     """Replace the workbook only after the merged package checks out.
 
@@ -798,6 +809,7 @@ def safe_save_workbook(workbook: Workbook, path: str | Path) -> None:
     target = Path(path).expanduser().resolve()
     if not target.is_file():
         raise FileNotFoundError(f"File not found: {target}")
+    _warn_if_external_lock(target)
     backup = target.with_name(target.name + ".bak")
     shutil.copy2(target, backup)
 
@@ -823,6 +835,7 @@ def save_new_workbook(workbook: Workbook, path: str | Path) -> None:
     """Write a new workbook. An existing file is replaced only after it validates."""
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
+    _warn_if_external_lock(target)
     tmp_path = _temp_workbook_path(target.parent, target.suffix)
     try:
         workbook.save(tmp_path)

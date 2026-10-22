@@ -7,31 +7,31 @@ The agent needs two things:
 
 ## 1. Pick a binary for your system
 
-Each file already contains Python and the libraries. Nothing is installed globally.
+Each archive already contains Python and the libraries. Nothing is installed globally. The program is a folder, not a single file: it starts without unpacking into `/tmp`. A single-file build (`--onefile`) is opt-in only, because every launch unpacks about 55 MB and a hard kill leaks that directory.
 
-A push to `main` updates the draft release for the version in `pyproject.toml` (now `v0.1.0`): [GitHub releases](https://github.com/keinerdeveloper/spreadsheet-tools/releases). Download the file for your machine:
+A push to `main` updates the draft release for the version in `pyproject.toml` (now `v0.2.0`): [GitHub releases](https://github.com/keinerdeveloper/spreadsheet-tools/releases). Download the archive for your machine:
 
-| Your machine | File |
+| Your machine | Archive |
 | --- | --- |
-| Linux, 64-bit PC | `spreadsheet-tools-linux-x86_64` |
-| Mac, Apple Silicon | `spreadsheet-tools-macos-arm64` |
-| Windows, 64-bit | `spreadsheet-tools-windows-x86_64.exe` |
+| Linux, 64-bit PC | `spreadsheet-tools-linux-x86_64.zip` |
+| Mac, Apple Silicon | `spreadsheet-tools-macos-arm64.zip` |
+| Windows, 64-bit | `spreadsheet-tools-windows-x86_64.zip` |
 
-On Linux and Mac, mark it runnable:
+Unzip it. The MCP command is the executable inside the folder, not the zip:
 
-```bash
-chmod +x spreadsheet-tools-linux-x86_64
+```text
+spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64
 ```
 
-Use your filename. Put the file anywhere. An absolute path in the config below is enough.
+On Linux and Mac, mark that file runnable (`chmod +x`). Put the folder anywhere.
 
-The same file is the CLI:
+The same executable is the CLI:
 
 ```bash
-./spreadsheet-tools-linux-x86_64 list-sheets "/path/to/book.xlsx"
+./spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64 list-sheets "/path/to/book.xlsx"
 ```
 
-No arguments from a terminal prints help. An agent launching it with a pipe starts the MCP server.
+No arguments from a terminal prints help. An agent launching it with a pipe starts the MCP server. The first stderr line is the version, Python, pid, and cwd.
 
 Intel Macs are not in the table. Use the source install below.
 
@@ -44,7 +44,7 @@ If the client already has an MCP file, add the `spreadsheet-tools` entry inside 
   "mcpServers": {
     "spreadsheet-tools": {
       "type": "stdio",
-      "command": "/absolute/path/to/spreadsheet-tools-linux-x86_64"
+      "command": "/absolute/path/to/spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64"
     }
   }
 }
@@ -66,7 +66,7 @@ OpenCode wants the program as a command list:
   "mcp": {
     "spreadsheet-tools": {
       "type": "local",
-      "command": ["/absolute/path/to/spreadsheet-tools-linux-x86_64"],
+      "command": ["/absolute/path/to/spreadsheet-tools-linux-x86_64/spreadsheet-tools-linux-x86_64"],
       "enabled": true
     }
   }
@@ -119,7 +119,7 @@ cd spreadsheet-tools
 uv sync
 ```
 
-`setup/mcp.json` in the repo points at a built binary. For a source checkout, the MCP command is `uv` again:
+`setup/mcp.json` is a template. The `command` value is a placeholder. Replace it with the absolute path of the executable on your machine. For a source checkout, the command is `uv` instead:
 
 ```json
 {

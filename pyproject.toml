@@ -1,6 +1,6 @@
 [project]
 name = "spreadsheet-tools"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI-friendly Excel (.xlsx/.xlsm) CLI tools with cleaned reads and style-aware edits"
 readme = "README.md"
 authors = [
@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "mcp>=2.3.0",
     "openpyxl>=3.1.5",
+    "toon-format>=1.2.0",
 ]
 
 [project.scripts]

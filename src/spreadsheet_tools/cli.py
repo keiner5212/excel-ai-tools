@@ -19,6 +19,7 @@ from spreadsheet_tools.reader import (
     validate_rules,
     workbook_info,
 )
+from spreadsheet_tools.render import render
 from spreadsheet_tools.snapshot import (
     create_snapshot,
     diff_snapshots,
@@ -72,8 +73,8 @@ def _coerce_value(raw: str) -> object:
     return raw
 
 
-def _print_json(payload: dict[str, Any]) -> None:
-    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
+def _print_result(payload: dict[str, Any]) -> None:
+    sys.stdout.write(render(payload))
     sys.stdout.write("\n")
 
 
@@ -459,13 +460,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "list-sheets":
-            _print_json(list_sheets(args.file))
+            _print_result(list_sheets(args.file))
         elif args.command == "workbook-info":
-            _print_json(workbook_info(args.file))
+            _print_result(workbook_info(args.file))
         elif args.command == "sheet-info":
-            _print_json(sheet_info(args.file, args.sheet))
+            _print_result(sheet_info(args.file, args.sheet))
         elif args.command == "read-range":
-            _print_json(
+            _print_result(
                 read_range(
                     args.file,
                     sheet_name=args.sheet,
@@ -479,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "read-cell":
-            _print_json(
+            _print_result(
                 read_cell(
                     args.file,
                     sheet_name=args.sheet,
@@ -488,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "cell-style":
-            _print_json(
+            _print_result(
                 get_cell_style_info(args.file, sheet_name=args.sheet, address=args.cell)
             )
         elif args.command == "edit-cell":
@@ -496,7 +497,7 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(
                     "edit-cell requires at least one of --value, --clear, or --style-json"
                 )
-            _print_json(
+            _print_result(
                 edit_cell(
                     args.file,
                     sheet_name=args.sheet,
@@ -508,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "find":
-            _print_json(
+            _print_result(
                 find_values(
                     args.file,
                     query=args.query,
@@ -518,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "copy-sheet":
-            _print_json(
+            _print_result(
                 copy_sheet_structure(
                     args.file,
                     source_sheet=args.source_sheet,
@@ -527,7 +528,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "section-map":
-            _print_json(
+            _print_result(
                 section_map(
                     args.file,
                     sheet_name=args.sheet,
@@ -536,7 +537,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "audit-range":
-            _print_json(
+            _print_result(
                 audit_range(
                     args.file,
                     sheet_name=args.sheet,
@@ -556,7 +557,7 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 parser.error("--data-rows must be in format START-END, e.g. 325-328")
             cost_col_arg = args.cost_col if args.cost_col.strip() else None
-            _print_json(
+            _print_result(
                 describe_section(
                     args.file,
                     sheet_name=args.sheet,
@@ -569,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "find-replace":
-            _print_json(
+            _print_result(
                 find_replace(
                     args.file,
                     query=args.query,
@@ -584,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "validate":
-            _print_json(
+            _print_result(
                 validate_rules(
                     args.file,
                     sheet_name=args.sheet,
@@ -599,7 +600,7 @@ def main(argv: list[str] | None = None) -> int:
                 raw_edits = json.loads(args.edits_json)
             if not isinstance(raw_edits, list):
                 parser.error("edits must be a JSON array")
-            _print_json(
+            _print_result(
                 batch_edit(
                     args.file,
                     sheet_name=args.sheet,
@@ -608,7 +609,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "snapshot":
-            _print_json(
+            _print_result(
                 create_snapshot(
                     args.file,
                     sheet_name=args.sheet,
@@ -617,7 +618,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "snapshot-diff":
-            _print_json(
+            _print_result(
                 diff_snapshots(
                     args.file,
                     sheet_name=args.sheet,
@@ -626,29 +627,29 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "list-snapshots":
-            _print_json(list_snapshots(args.file, sheet_name=args.sheet))
+            _print_result(list_snapshots(args.file, sheet_name=args.sheet))
         elif args.command == "create-empty-workbook":
-            _print_json(create_empty_workbook(args.file, sheet_name=args.sheet))
+            _print_result(create_empty_workbook(args.file, sheet_name=args.sheet))
         elif args.command == "merge-cells":
-            _print_json(
+            _print_result(
                 merge_cells(
                     args.file, sheet_name=args.sheet, cell_range=args.cell_range
                 )
             )
         elif args.command == "unmerge-cells":
-            _print_json(
+            _print_result(
                 unmerge_cells(
                     args.file, sheet_name=args.sheet, cell_range=args.cell_range
                 )
             )
         elif args.command == "set-column-width":
-            _print_json(
+            _print_result(
                 set_column_width(
                     args.file, sheet_name=args.sheet, col=args.col, width=args.width
                 )
             )
         elif args.command == "set-row-height":
-            _print_json(
+            _print_result(
                 set_row_height(
                     args.file, sheet_name=args.sheet, row=args.row, height=args.height
                 )
@@ -660,7 +661,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             col_edits = json.loads(args.columns_json) if args.columns_json else None
             row_edits = json.loads(args.rows_json) if args.rows_json else None
-            _print_json(
+            _print_result(
                 batch_set_dimensions(
                     args.file,
                     sheet_name=args.sheet,
@@ -669,22 +670,24 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "freeze-panes":
-            _print_json(freeze_panes(args.file, sheet_name=args.sheet, cell=args.cell))
+            _print_result(
+                freeze_panes(args.file, sheet_name=args.sheet, cell=args.cell)
+            )
         elif args.command == "unfreeze-panes":
-            _print_json(unfreeze_panes(args.file, sheet_name=args.sheet))
+            _print_result(unfreeze_panes(args.file, sheet_name=args.sheet))
         elif args.command == "add-sheet":
-            _print_json(
+            _print_result(
                 add_sheet(args.file, sheet_name=args.sheet, position=args.position)
             )
         elif args.command == "rename-sheet":
-            _print_json(
+            _print_result(
                 rename_sheet(args.file, old_name=args.old_name, new_name=args.new_name)
             )
         elif args.command == "format-range":
             style = _load_json_arg(args.style_json)
             if not style:
                 parser.error("format-range requires --style-json with at least one key")
-            _print_json(
+            _print_result(
                 format_range(
                     args.file,
                     sheet_name=args.sheet,
@@ -693,11 +696,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "set-tab-color":
-            _print_json(
+            _print_result(
                 set_tab_color(args.file, sheet_name=args.sheet, color=args.color)
             )
         elif args.command == "auto-filter":
-            _print_json(
+            _print_result(
                 toggle_auto_filter(
                     args.file, sheet_name=args.sheet, cell_range=args.cell_range
                 )
