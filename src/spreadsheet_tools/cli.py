@@ -19,6 +19,11 @@ from spreadsheet_tools.reader import (
     validate_rules,
     workbook_info,
 )
+from spreadsheet_tools.snapshot import (
+    create_snapshot,
+    diff_snapshots,
+    list_snapshots,
+)
 from spreadsheet_tools.writer import (
     add_sheet,
     batch_edit,
@@ -38,11 +43,6 @@ from spreadsheet_tools.writer import (
     toggle_auto_filter,
     unfreeze_panes,
     unmerge_cells,
-)
-from spreadsheet_tools.snapshot import (
-    create_snapshot,
-    diff_snapshots,
-    list_snapshots,
 )
 
 

@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "spreadsheet-tools": {
-      "type": "stdio",
-      "command": "uv",
-      "args": ["run", "--directory", ".", "spreadsheet-tools-mcp"]
-    }
-  }
-}

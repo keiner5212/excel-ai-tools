@@ -8,7 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "mcp>=1.27.1",
+    "mcp>=2.3.0",
     "openpyxl>=3.1.5",
 ]
 
@@ -22,9 +22,18 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.3",
-    "ruff>=0.15.14",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
 ]
+
+[tool.ruff.lint]
+# ValueError is the project error for bad input.
+# EXE002: this tree is stored with the executable bit forced on.
+# PYI041: int and float are different Excel cell types. Keep both.
+ignore = ["TRY004", "EXE002", "PYI041"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

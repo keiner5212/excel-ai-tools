@@ -39,7 +39,7 @@ read_range(file="/tmp/report.xlsx", sheet="Data",
            from_col="A", to_col="B", from_row=0, to_row=5)
 ```
 
-See `SKILL.md` files for the complete tool reference.
+See `setup/spreadsheet-tools/SKILL.md` for the complete tool reference.
 
 ## Requirements
 
@@ -48,26 +48,21 @@ See `SKILL.md` files for the complete tool reference.
 
 ## Setup
 
+Step by step: [setup/INSTALL.md](setup/INSTALL.md). Download one standalone binary for your OS (no Python, no uv), or install from source. Copy the skill folder into the agent's skills directory either way.
+
 ```bash
 git clone https://github.com/keinerdeveloper/spreadsheet-tools.git
 cd spreadsheet-tools
 uv sync
 ```
 
-## MCP Integration
+## MCP
 
-Client-specific config files are included in the repo and work out of the box
-when you open this project:
+`setup/mcp.json` is the client config. Copy it into the agent, global or per-project. `uv run --project` loads this repo and does not change the working directory, so the config file can live anywhere.
 
-| Client | Config file |
-|--------|-------------|
-| **Cursor** | `.cursor/mcp.json` |
-| **Claude Code** | `.mcp.json` |
-| **OpenCode** | `opencode.json` → `mcp` key |
+File arguments are normal paths. An absolute path or `~/...` edits that workbook wherever it is. A bare filename still lands in `workspace/` next to the client working directory. `create_empty_workbook` creates missing parent directories.
 
-For setup in other projects or global configuration, see **[docs/mcp-setup.md](docs/mcp-setup.md)**.
-
-That guide covers: Cursor, Claude Code, Claude Desktop, OpenCode, and any generic MCP client.
+If this clone is not at the path inside `setup/mcp.json`, change the `--project` argument.
 
 ## CLI Usage (Fallback)
 
@@ -104,13 +99,7 @@ Full command list: `uv run spreadsheet-tools --help`
 
 ## AI Agent Integration
 
-Skill files for major AI coding tools:
-
-| Tool | Skill path |
-|------|-----------|
-| Cursor | `.cursor/skills/spreadsheet-tools/SKILL.md` |
-| Claude Code | `.claude/skills/spreadsheet-tools/SKILL.md` |
-| OpenCode | `.opencode/skills/spreadsheet-tools/SKILL.md` |
+One skill: `setup/spreadsheet-tools/`. Agents do not read it there. Copy the folder into the agent's skills directory. Paths are in [setup/INSTALL.md](setup/INSTALL.md).
 
 ## Available Tools (31 total)
 

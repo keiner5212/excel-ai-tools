@@ -6,10 +6,10 @@ call them directly — no shell scripting, no openpyxl imports, no helper files.
 Run via:
     uv run spreadsheet-tools-mcp
 
-Or from Claude Desktop / Cursor mcp.json:
+Or from any MCP client (config can live anywhere; --project does not chdir):
     {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/repo", "spreadsheet-tools-mcp"]
+      "args": ["run", "--project", "/path/to/repo", "spreadsheet-tools-mcp"]
     }
 
 IMPORTANT FOR AI AGENTS
@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from spreadsheet_tools.reader import (
     audit_range as _audit_range,
@@ -45,6 +45,11 @@ from spreadsheet_tools.reader import (
     sheet_info as _sheet_info,
     validate_rules as _validate_rules,
     workbook_info as _workbook_info,
+)
+from spreadsheet_tools.snapshot import (
+    create_snapshot as _create_snapshot,
+    diff_snapshots as _diff_snapshots,
+    list_snapshots as _list_snapshots,
 )
 from spreadsheet_tools.writer import (
     add_sheet as _add_sheet,
@@ -66,20 +71,16 @@ from spreadsheet_tools.writer import (
     unfreeze_panes as _unfreeze_panes,
     unmerge_cells as _unmerge_cells,
 )
-from spreadsheet_tools.snapshot import (
-    create_snapshot as _create_snapshot,
-    diff_snapshots as _diff_snapshots,
-    list_snapshots as _list_snapshots,
-)
 
-mcp = FastMCP(
+mcp = MCPServer(
     "spreadsheet-tools",
     instructions=(
         "Excel (.xlsx/.xlsm) read/write tools. "
         "NEVER use Python scripts or import openpyxl — use these tools exclusively. "
-        "Pass any file path to operate on existing files. "
+        "Pass any file path. Absolute paths and '~' edit that file wherever it is. "
+        "The config location does not limit which workbooks you can open. "
         "For new workbooks call create_empty_workbook; bare filenames auto-go to workspace/ "
-        "but you may pass any absolute or relative path. "
+        "but any absolute or relative path works, and missing parent dirs are created. "
         "Row indices for read_range/audit_range/section_map are ZERO-BASED (Excel row 1 = 0). "
         "Row numbers for set_row_height/batch_set_dimensions are 1-BASED (Excel row number). "
         "Columns are always Excel letters (A, B, ...), never numeric indices."
@@ -742,14 +743,16 @@ def copy_sheet(
 def create_empty_workbook(filename: str, sheet: str = "Sheet1") -> dict[str, Any]:
     """Create a new empty Excel workbook.
 
-    Pass any file path. Bare filenames (no directory separator) are automatically
-    placed in workspace/ as a convenience convention, but any path works:
-        create_empty_workbook("report.xlsx")           → workspace/report.xlsx
-        create_empty_workbook("/tmp/report.xlsx")      → /tmp/report.xlsx
-        create_empty_workbook("output/report.xlsx")    → output/report.xlsx (relative to cwd)
+    Pass any file path. Absolute paths and '~' write that file wherever it is.
+    Missing parent directories are created. Bare filenames (no directory
+    separator) go to workspace/ next to the client cwd:
+        create_empty_workbook("report.xlsx")           -> workspace/report.xlsx
+        create_empty_workbook("/tmp/report.xlsx")      -> /tmp/report.xlsx
+        create_empty_workbook("~/docs/report.xlsx")    -> ~/docs/report.xlsx
+        create_empty_workbook("output/report.xlsx")    -> output/report.xlsx
 
     Args:
-        filename: Output path. Bare name → workspace/ automatically.
+        filename: Output path. Bare name -> workspace/ automatically.
         sheet: Name of the first sheet.
     """
     return _create_empty_workbook(filename, sheet_name=sheet)

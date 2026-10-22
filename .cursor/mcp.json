@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "spreadsheet-tools": {
-      "command": "uv",
-      "args": ["run", "--directory", "${workspaceFolder}", "spreadsheet-tools-mcp"]
-    }
-  }
-}

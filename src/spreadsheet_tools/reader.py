@@ -97,8 +97,12 @@ def sheet_info(path: str, sheet_name: str | None = None) -> dict[str, Any]:
             "dimensions": {
                 "min_row": sheet.min_row or 1,
                 "max_row": sheet.max_row or 1,
-                "min_col": get_column_letter(sheet.min_column) if sheet.min_column else "A",
-                "max_col": get_column_letter(sheet.max_column) if sheet.max_column else "A",
+                "min_col": get_column_letter(sheet.min_column)
+                if sheet.min_column
+                else "A",
+                "max_col": get_column_letter(sheet.max_column)
+                if sheet.max_column
+                else "A",
             },
             "max_row": sheet.max_row,
             "max_column": sheet.max_column,

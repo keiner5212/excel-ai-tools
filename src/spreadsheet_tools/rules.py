@@ -60,7 +60,7 @@ def _cell_value(sheet: Any, address: str, merge_lookup: MergeLookup) -> object |
     effective = _resolve_address(address, merge_lookup)
     try:
         return sheet[effective].value
-    except Exception:
+    except (KeyError, IndexError, ValueError, AttributeError):
         return None
 
 

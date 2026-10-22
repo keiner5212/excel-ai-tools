@@ -23,9 +23,9 @@ batch_edit(file="/tmp/report.xlsx", sheet="Data", edits=[
 ])
 ```
 
-Pass any absolute or relative path to `file`. Bare filenames (no `/`) go to
-`workspace/` automatically, but that's just a convention — use whatever path works
-for your context.
+Pass any path to `file`. Absolute paths and `~` edit that file wherever it
+sits. The folder that holds `mcp.json` does not limit which workbooks you can
+open. Bare filenames (no `/`) go to `workspace/` next to the client cwd.
 
 ## How to Use — CLI (Fallback)
 
@@ -50,8 +50,9 @@ uv run spreadsheet-tools <command> [args...]
 5. **Columns** always use Excel letters (`A`, `B`, `C`...). Never numeric indices.
 6. **Merged cells**: master cell (top-left) holds value. Slave cells return `null`.
    Call `sheet_info` to see all merged ranges before editing.
-7. **New workbooks**: pass any path to `create_empty_workbook`. Bare filenames
-   (no `/`) go to `workspace/` automatically, but any absolute or relative path works.
+7. **New workbooks**: pass any path to `create_empty_workbook`. Absolute paths
+   and `~` write there; missing parent directories are created. Bare filenames
+   (no `/`) go to `workspace/` next to the client cwd.
 8. **Formula cells**: by default, reads return cached computed values (`None` if no cache).
    Use `--include-formulas` (CLI) or `include_formulas=True` (MCP) to get formula text
    like `=SUM(A1,A2)` instead of the computed result. This is essential when the
@@ -199,5 +200,6 @@ Full CLI reference: run `uv run spreadsheet-tools --help` or `uv run spreadsheet
 
 ## Additional Resources
 
-- MCP setup for Cursor, Claude Code, Claude Desktop, OpenCode: [docs/mcp-setup.md](../../docs/mcp-setup.md)
+- Install (MCP config and where to put this skill): [INSTALL.md](../INSTALL.md)
+- MCP config (copy anywhere): [mcp.json](../mcp.json)
 - JSON output shapes for all commands: [reference.md](reference.md)

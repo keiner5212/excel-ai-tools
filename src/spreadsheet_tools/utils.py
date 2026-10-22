@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import io
 import os
+import posixpath
 import re
 import shutil
 import tempfile
-import warnings
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -100,13 +100,13 @@ def resolve_output_path(path: str) -> Path:
     """Route bare filenames (no directory component) to ./workspace/.
 
     A bare filename is one whose parent is the current directory (e.g. 'file.xlsx').
-    Paths with an explicit directory component (e.g. 'subdir/file.xlsx' or
-    '/abs/path/file.xlsx') are returned unchanged.
+    Absolute paths, '~' paths, and paths with a directory component are kept.
+    '~' is expanded so a home path is not treated as a relative name.
 
     The workspace directory is created if it does not already exist.
     """
-    p = Path(path)
-    if p.parent == Path("."):
+    p = Path(path).expanduser()
+    if not p.is_absolute() and p.parent == Path("."):
         workspace = Path(WORKSPACE_DIR_NAME)
         workspace.mkdir(exist_ok=True)
         return workspace / p.name
@@ -131,8 +131,10 @@ def _close_vba_archive(workbook: Workbook) -> None:
     if workbook.vba_archive is not None:
         try:
             workbook.vba_archive.close()
-        except Exception:
-            pass  # already closed — ignore
+        except (OSError, ValueError) as exc:
+            # ZipFile.close raises if the archive handle is already gone.
+            if "closed" not in str(exc).lower():
+                raise
 
 
 def open_workbook(
@@ -220,7 +222,7 @@ def parse_cell_address(address: str) -> tuple[str, int]:
 
 def get_sheet(workbook: Workbook, sheet_name: str | None) -> Worksheet:
     # Coerce the string literal "null" that some AI agents send when they mean
-    # to omit the parameter (FastMCP may or may not coerce it automatically).
+    # to omit the parameter (the MCP SDK may or may not coerce it automatically).
     if sheet_name == "null":
         sheet_name = None
     # Check membership before access to avoid a raw KeyError from workbook[name].
@@ -312,8 +314,6 @@ def _merge_content_types(orig_data: bytes, new_data: bytes) -> bytes:
     ).encode("utf-8")
 
 
-_WORKSHEET_RE = re.compile(r"^xl/worksheets/sheet\d+\.xml$")
-
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _R_NS_DECL = f'xmlns:r="{_R_NS}"'
 
@@ -362,8 +362,8 @@ def _inject_drawing_elements(new_xml: bytes, elements: list[str]) -> bytes:
     text = new_xml.decode("utf-8", errors="replace")
     tag_pattern = "|".join(_DROPPED_ELEMENT_TAGS)
 
-    # Tags where at most one element per sheet is allowed (openpyxl already wrote one)
-    _SINGLE_INSTANCE_TAGS = {"legacyDrawing", "picture"}
+    # OOXML allows one drawing, one legacyDrawing, and one picture per sheet.
+    _SINGLE_INSTANCE_TAGS = {"drawing", "legacyDrawing", "picture"}
     existing_tags = set(re.findall(rf"<({tag_pattern})[\s/>]", text))
     # Support both single- and double-quoted r:id attributes to avoid
     # duplicate injection when the original XML used single quotes.
@@ -378,8 +378,10 @@ def _inject_drawing_elements(new_xml: bytes, elements: list[str]) -> bytes:
             continue
         tag = tag_match.group(1)
         # Skip if this single-instance tag is already present in new XML
-        if tag in _SINGLE_INSTANCE_TAGS and tag in existing_tags:
-            continue
+        if tag in _SINGLE_INSTANCE_TAGS:
+            if tag in existing_tags:
+                continue
+            existing_tags.add(tag)
         rid_match = re.search(r"""r:id=["']([^"']+)["']""", snippet)
         rid = rid_match.group(1) if rid_match else None
         if rid is None or rid not in existing_rids:
@@ -389,112 +391,443 @@ def _inject_drawing_elements(new_xml: bytes, elements: list[str]) -> bytes:
         return new_xml
 
     injected_block = "\n".join(_ensure_r_namespace(s) for s in to_inject)
-    text = text.replace("</worksheet>", f"{injected_block}</worksheet>", 1)
+    # OOXML sequence puts drawing/picture before tableParts and extLst.
+    # Appending after extLst makes Excel repair the sheet.
+    anchors = [text.find(token) for token in ("<tableParts", "<extLst", "</worksheet>")]
+    anchors = [index for index in anchors if index != -1]
+    if not anchors:
+        raise ValueError("Worksheet XML has no closing tag")
+    at = min(anchors)
+    text = text[:at] + injected_block + text[at:]
     return text.encode("utf-8")
 
 
-def _patch_worksheet_xml(orig_data: bytes, new_data: bytes) -> bytes:
-    """Restore drawing references dropped by openpyxl from worksheet XML."""
-    orig_elements = _extract_drawing_elements(orig_data)
-    return _inject_drawing_elements(new_data, orig_elements)
+# Parts openpyxl drops. Structural parts (sheets, styles, strings) stay with
+# openpyxl so a deleted or reordered sheet is not copied back into the package.
+_RESTORE_PREFIXES = (
+    "xl/media/",
+    "xl/drawings/",
+    "xl/charts/",
+    "xl/embeddings/",
+    "xl/activeX/",
+    "xl/ctrlProps/",
+    "xl/printerSettings/",
+    "xl/diagrams/",
+    "xl/customXml/",
+    "xl/comments/",
+    "xl/threadedComments/",
+    "xl/persons/",
+    "xl/ink/",
+    "customUI/",
+    "xl/customUI/",
+)
+_RESTORE_FILES = frozenset({"xl/vbaProject.bin", "xl/vbaProjectSignature.bin"})
+_WORKBOOK_PRESERVE_TYPES = ("vbaProject", "customXml", "attachedTool", "customUI")
+_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+
+
+def _restorable(name: str) -> bool:
+    return name in _RESTORE_FILES or name.startswith(_RESTORE_PREFIXES)
+
+
+def _read_zip(archive: zipfile.ZipFile) -> dict[str, bytes]:
+    return {name: archive.read(name) for name in archive.namelist()}
+
+
+def _parse_rels(data: bytes) -> list[dict[str, str]]:
+    tag = f"{{{_RELS_NS}}}Relationship"
+    items: list[dict[str, str]] = []
+    for el in ET.fromstring(data).iter(tag):
+        item = {
+            "Id": el.get("Id") or "",
+            "Type": el.get("Type") or "",
+            "Target": el.get("Target") or "",
+        }
+        mode = el.get("TargetMode")
+        if mode:
+            item["TargetMode"] = mode
+        items.append(item)
+    return items
+
+
+def _write_rels(items: list[dict[str, str]]) -> bytes:
+    root = ET.Element(f"{{{_RELS_NS}}}Relationships")
+    for item in items:
+        attrib = {"Id": item["Id"], "Type": item["Type"], "Target": item["Target"]}
+        if item.get("TargetMode"):
+            attrib["TargetMode"] = item["TargetMode"]
+        ET.SubElement(root, f"{{{_RELS_NS}}}Relationship", attrib)
+    return _xml_bytes(root)
+
+
+def _xml_bytes(root: ET.Element) -> bytes:
+    xml = ET.tostring(root, encoding="unicode")
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml).encode()
+
+
+def _rels_path(part: str) -> str:
+    folder, name = posixpath.split(part)
+    return posixpath.join(folder, "_rels", name + ".rels")
+
+
+def _source_part_for_rels(rels_name: str) -> str:
+    folder, name = posixpath.split(rels_name)
+    if posixpath.basename(folder) != "_rels":
+        return rels_name
+    parent = posixpath.dirname(folder)
+    return posixpath.join(parent, name[: -len(".rels")])
+
+
+def _is_external_rel(rel: dict[str, str]) -> bool:
+    target = rel.get("Target") or ""
+    mode = (rel.get("TargetMode") or "").lower()
+    return mode == "external" or "://" in target or target.startswith(("#", "mailto:"))
+
+
+def _resolve_rel_target(source_part: str, target: str) -> str | None:
+    if not target or _is_external_rel({"Target": target}):
+        return None
+    if target.startswith("/"):
+        resolved = posixpath.normpath(target.lstrip("/"))
+    else:
+        resolved = posixpath.normpath(
+            posixpath.join(posixpath.dirname(source_part), target)
+        )
+    if resolved.startswith("..") or not resolved:
+        return None
+    return resolved
+
+
+def _next_rid(used: set[str]) -> str:
+    number = 1
+    while f"rId{number}" in used:
+        number += 1
+    return f"rId{number}"
+
+
+def _rewrite_rid(snippet: str, old: str, new: str) -> str:
+    return re.sub(
+        rf"""(r:id=["']){re.escape(old)}(["'])""",
+        rf"\1{new}\2",
+        snippet,
+        count=1,
+    )
+
+
+def _sheet_parts_by_name(parts: dict[str, bytes]) -> dict[str, str]:
+    """Map sheet name -> worksheet part path. Match by name, not sheetN.xml."""
+    workbook = parts.get("xl/workbook.xml")
+    rels_blob = parts.get("xl/_rels/workbook.xml.rels")
+    if workbook is None or rels_blob is None:
+        return {}
+    rel_by_id = {item["Id"]: item["Target"] for item in _parse_rels(rels_blob)}
+    found: dict[str, str] = {}
+    for el in ET.fromstring(workbook).iter(f"{{{_MAIN_NS}}}sheet"):
+        name = el.get("name")
+        rid = el.get(f"{{{_R_NS}}}id")
+        if not name or not rid or rid not in rel_by_id:
+            continue
+        target = rel_by_id[rid]
+        if target.startswith("/"):
+            part = posixpath.normpath(target.lstrip("/"))
+        else:
+            part = posixpath.normpath(posixpath.join("xl", target))
+        if part.startswith("xl/worksheets/"):
+            found[name] = part
+    return found
+
+
+def _pair_sheets(
+    original: dict[str, str], rewritten: dict[str, str]
+) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    unmatched_new: list[str] = []
+    for name, part in rewritten.items():
+        if name in original:
+            pairs.append((original[name], part))
+        else:
+            unmatched_new.append(part)
+    unmatched_orig = [part for name, part in original.items() if name not in rewritten]
+    # A single rename keeps one sheet on each side with no shared name.
+    if len(unmatched_new) == 1 and len(unmatched_orig) == 1:
+        pairs.append((unmatched_orig[0], unmatched_new[0]))
+    return pairs
+
+
+def _copy_closure(
+    origin: dict[str, bytes],
+    final: dict[str, bytes],
+    part: str,
+    seen: set[str],
+) -> None:
+    if part in seen or part in final or part not in origin or not _restorable(part):
+        return
+    seen.add(part)
+    final[part] = origin[part]
+    rels_name = _rels_path(part)
+    if rels_name not in origin or rels_name in final:
+        return
+    final[rels_name] = origin[rels_name]
+    for rel in _parse_rels(origin[rels_name]):
+        if _is_external_rel(rel):
+            continue
+        child = _resolve_rel_target(part, rel["Target"])
+        if child:
+            _copy_closure(origin, final, child, seen)
+
+
+def _graft_sheet_drawings(
+    origin: dict[str, bytes],
+    final: dict[str, bytes],
+    orig_part: str,
+    new_part: str,
+) -> None:
+    """Put original drawing refs back onto the matching openpyxl sheet.
+
+    Relationship ids are remapped when openpyxl already used that rId for
+    something else (a hyperlink, for example). Targets are copied only when
+    they are embedded parts openpyxl dropped.
+    """
+    if orig_part not in origin or new_part not in final:
+        return
+    elements = _extract_drawing_elements(origin[orig_part])
+    if not elements:
+        return
+    orig_rels_name = _rels_path(orig_part)
+    orig_rels = _parse_rels(origin[orig_rels_name]) if orig_rels_name in origin else []
+    orig_by_id = {item["Id"]: item for item in orig_rels}
+    new_rels_name = _rels_path(new_part)
+    new_rels = _parse_rels(final[new_rels_name]) if new_rels_name in final else []
+    used_ids = {item["Id"] for item in new_rels}
+    rewritten: list[str] = []
+    for snippet in elements:
+        rid_match = re.search(r"""r:id=["']([^"']+)["']""", snippet)
+        if not rid_match:
+            continue
+        old_rid = rid_match.group(1)
+        rel = orig_by_id.get(old_rid)
+        if rel is None:
+            continue
+        current = next((item for item in new_rels if item["Id"] == old_rid), None)
+        rel_key = (rel["Type"], rel["Target"], rel.get("TargetMode"))
+        if current is None:
+            new_rels.append(dict(rel))
+            used_ids.add(old_rid)
+            rid = old_rid
+        elif (current["Type"], current["Target"], current.get("TargetMode")) != rel_key:
+            rid = _next_rid(used_ids)
+            snippet = _rewrite_rid(snippet, old_rid, rid)
+            used_ids.add(rid)
+            new_rels.append({**rel, "Id": rid})
+        else:
+            rid = old_rid
+        if not _is_external_rel(rel):
+            child = _resolve_rel_target(orig_part, rel["Target"])
+            if child:
+                _copy_closure(origin, final, child, set())
+        rewritten.append(snippet)
+    if not rewritten:
+        return
+    final[new_part] = _inject_drawing_elements(final[new_part], rewritten)
+    final[new_rels_name] = _write_rels(new_rels)
+
+
+def _graft_workbook_extras(origin: dict[str, bytes], final: dict[str, bytes]) -> None:
+    """Keep workbook-level embeds (VBA, custom XML) openpyxl failed to write."""
+    rels_name = "xl/_rels/workbook.xml.rels"
+    if rels_name not in origin or "xl/workbook.xml" not in final:
+        return
+    new_rels = _parse_rels(final[rels_name]) if rels_name in final else []
+    known_targets = {item["Target"] for item in new_rels}
+    used_ids = {item["Id"] for item in new_rels}
+    changed = False
+    for rel in _parse_rels(origin[rels_name]):
+        rel_type = rel.get("Type") or ""
+        if not any(token in rel_type for token in _WORKBOOK_PRESERVE_TYPES):
+            continue
+        if rel["Target"] in known_targets or _is_external_rel(rel):
+            continue
+        part = _resolve_rel_target("xl/workbook.xml", rel["Target"])
+        if part is None or part not in origin or not _restorable(part):
+            continue
+        new_id = rel["Id"] if rel["Id"] not in used_ids else _next_rid(used_ids)
+        used_ids.add(new_id)
+        new_rels.append({**rel, "Id": new_id})
+        known_targets.add(rel["Target"])
+        _copy_closure(origin, final, part, set())
+        changed = True
+    if changed:
+        final[rels_name] = _write_rels(new_rels)
+
+
+def _prune_content_type_overrides(data: bytes, names: set[str]) -> bytes:
+    root = ET.fromstring(data)
+    override_tag = f"{{{_CT_NS}}}Override"
+    for el in list(root.findall(override_tag)):
+        part = (el.get("PartName") or "").lstrip("/")
+        if part not in names:
+            root.remove(el)
+    return _xml_bytes(root)
+
+
+def _harmonize_content_types(origin: dict[str, bytes], final: dict[str, bytes]) -> None:
+    ct_name = "[Content_Types].xml"
+    new_ct = final.get(ct_name)
+    if new_ct is None:
+        return
+    orig_ct = origin.get(ct_name)
+    merged = _merge_content_types(orig_ct, new_ct) if orig_ct is not None else new_ct
+    final[ct_name] = _prune_content_type_overrides(merged, set(final))
+
+
+def _write_zip(parts: dict[str, bytes], out_path: Path) -> None:
+    names = sorted(name for name in parts if name != "[Content_Types].xml")
+    if "[Content_Types].xml" in parts:
+        names.insert(0, "[Content_Types].xml")
+    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in names:
+            info = zipfile.ZipInfo(filename=name)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.date_time = (1980, 1, 1, 0, 0, 0)
+            archive.writestr(info, parts[name])
+
+
+def _strip_dangling_vba_rel(path: Path) -> None:
+    """Drop a vbaProject relationship when the binary is absent.
+
+    openpyxl writes that relationship for every keep_vba load, including
+    workbooks that have no VBA. Excel then repairs the file.
+    """
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        rels_name = "xl/_rels/workbook.xml.rels"
+        if "xl/vbaProject.bin" in names or rels_name not in names:
+            return
+        rels = _parse_rels(archive.read(rels_name))
+        kept = [
+            rel
+            for rel in rels
+            if _resolve_rel_target("xl/workbook.xml", rel["Target"])
+            != "xl/vbaProject.bin"
+        ]
+        if len(kept) == len(rels):
+            return
+        parts = _read_zip(archive)
+    parts[rels_name] = _write_rels(kept)
+    if "[Content_Types].xml" in parts:
+        parts["[Content_Types].xml"] = _prune_content_type_overrides(
+            parts["[Content_Types].xml"], set(parts)
+        )
+    _write_zip(parts, path)
+
+
+def _temp_workbook_path(directory: Path, suffix: str) -> Path:
+    excel_suffix = suffix if suffix in {".xlsx", ".xlsm", ".xltx", ".xltm"} else ".xlsx"
+    fd, name = tempfile.mkstemp(dir=directory, suffix=excel_suffix)
+    os.close(fd)
+    return Path(name)
+
+
+def _assert_package_consistent(path: Path) -> None:
+    """Reject a package Excel would have to repair. Caller keeps the original."""
+    _strip_dangling_vba_rel(path)
+    with zipfile.ZipFile(path) as archive:
+        bad = archive.testzip()
+        if bad is not None:
+            raise ValueError(f"Corrupt ZIP entry after save: {bad}")
+        names = set(archive.namelist())
+        content_types = archive.read("[Content_Types].xml")
+        override_tag = f"{{{_CT_NS}}}Override"
+        for el in ET.fromstring(content_types).findall(override_tag):
+            part = (el.get("PartName") or "").lstrip("/")
+            if part not in names:
+                raise ValueError(f"Content type points at missing part {part}")
+        for name in names:
+            if name.startswith("xl/worksheets/sheet") and name.endswith(".xml"):
+                ET.fromstring(archive.read(name))
+            if not name.endswith(".rels"):
+                continue
+            source = _source_part_for_rels(name)
+            for rel in _parse_rels(archive.read(name)):
+                if _is_external_rel(rel):
+                    continue
+                target = _resolve_rel_target(source, rel["Target"])
+                if target is not None and target not in names:
+                    raise ValueError(f"{name} points at missing part {target}")
+    workbook = open_workbook(str(path), read_only=True, data_only=False)
+    try:
+        if not workbook.sheetnames:
+            raise ValueError("Workbook has no sheets after save")
+    finally:
+        workbook.close()
 
 
 def _merge_workbook_zips(
     original_path: Path, new_buf: io.BytesIO, out_path: Path
 ) -> None:
-    """Build a merged ZIP that preserves ALL original content.
+    """Use openpyxl's package as structure. Graft back only dropped embeds.
 
-    Algorithm:
-    - Take every file from openpyxl's output (updated cells, styles, workbook XML).
-    - For worksheet XML files: restore drawing/legacyDrawing/picture elements
-      that openpyxl silently drops (images, charts, VML shapes).
-    - For .rels files present in both ZIPs: merge relationship entries so
-      openpyxl never silently drops drawing/image/chart references.
-    - For [Content_Types].xml: merge from original + add new openpyxl entries.
-    - For any file present in the original but absent from openpyxl's output
-      (images in xl/media/, drawings in xl/drawings/, charts, pivot tables,
-      ActiveX, …): restore it verbatim from the original.
+    Sheets are paired by name so a delete or reorder cannot stick another
+    sheet's drawings onto the wrong worksheet. Relationship ids that collide
+    with openpyxl's own rels are renumbered. Parts openpyxl removed on purpose
+    (deleted sheets, calc chain, shared strings) are not copied back.
     """
     new_buf.seek(0)
     with (
         zipfile.ZipFile(original_path, "r") as orig_zip,
         zipfile.ZipFile(new_buf, "r") as new_zip,
-        zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as out_zip,
     ):
-        orig_names = set(orig_zip.namelist())
-        new_names = set(new_zip.namelist())
-
-        for name in new_zip.namelist():
-            data = new_zip.read(name)
-            if name in orig_names:
-                try:
-                    if name == "[Content_Types].xml":
-                        data = _merge_content_types(orig_zip.read(name), data)
-                    elif name.endswith(".rels"):
-                        # workbook.xml.rels must use openpyxl's rId numbering as
-                        # the base because openpyxl rewrites workbook.xml with new
-                        # rIds. Using the original as base would map those new rIds
-                        # to wrong targets (theme, styles, vbaProject instead of
-                        # the actual worksheet files).
-                        prefer_new = name == "xl/_rels/workbook.xml.rels"
-                        data = _merge_rels(
-                            orig_zip.read(name), data, prefer_new=prefer_new
-                        )
-                    elif _WORKSHEET_RE.match(name):
-                        # openpyxl drops <drawing>, <legacyDrawing>, <picture>
-                        # elements from sheet XML; restore them from the original.
-                        data = _patch_worksheet_xml(orig_zip.read(name), data)
-                except Exception as exc:
-                    warnings.warn(
-                        f"Failed to merge ZIP entry {name!r}: {exc}. "
-                        "Falling back to openpyxl's version; some content may be lost.",
-                        stacklevel=3,
-                    )
-            out_zip.writestr(new_zip.getinfo(name), data)
-
-        # Restore entries openpyxl dropped entirely
-        for name in orig_names - new_names:
-            out_zip.writestr(orig_zip.getinfo(name), orig_zip.read(name))
+        origin = _read_zip(orig_zip)
+        final = _read_zip(new_zip)
+    for orig_part, new_part in _pair_sheets(
+        _sheet_parts_by_name(origin), _sheet_parts_by_name(final)
+    ):
+        _graft_sheet_drawings(origin, final, orig_part, new_part)
+    _graft_workbook_extras(origin, final)
+    _harmonize_content_types(origin, final)
+    _write_zip(final, out_path)
 
 
 def safe_save_workbook(workbook: Workbook, path: str | Path) -> None:
-    """Save workbook with zero data loss.
+    """Replace the workbook only after the merged package checks out.
 
-    Strategy:
-    1. Back up original to <file>.bak.
-    2. Save openpyxl's output to an in-memory buffer.
-    3. Merge original ZIP and openpyxl buffer:
-       - .rels files are merged (all original relationships preserved).
-       - [Content_Types].xml is merged (original types preserved).
-       - Files openpyxl dropped (images, drawings, charts, VBA, …) are
-         restored verbatim from the original.
-    4. Write merged output to a temp file in the same directory.
-    5. Atomically rename temp → original (os.replace; POSIX atomic).
-
-    If step 5 fails the original is untouched. The .bak copy provides an
-    additional recovery path in case openpyxl's serialisation itself is lossy.
+    openpyxl writes to memory. The merge result is validated (zip integrity,
+    relationship targets, content types, and a reload) before os.replace.
+    A failed save leaves the original bytes in place.
     """
-    target = Path(path) if isinstance(path, str) else path
-    backup = target.with_suffix(target.suffix + ".bak")
+    target = Path(path).expanduser().resolve()
+    if not target.is_file():
+        raise FileNotFoundError(f"File not found: {target}")
+    backup = target.with_name(target.name + ".bak")
     shutil.copy2(target, backup)
 
     buf = io.BytesIO()
     workbook.save(buf)
 
-    fd, tmp_path_str = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
+    tmp_path = _temp_workbook_path(target.parent, target.suffix)
     try:
-        os.close(fd)
-        tmp_path = Path(tmp_path_str)
         _merge_workbook_zips(target, buf, tmp_path)
+        _assert_package_consistent(tmp_path)
         os.replace(tmp_path, target)
-        # Clean up backup only after successful atomic replace.
-        try:
-            backup.unlink()
-        except OSError:
-            pass  # non-critical; stale .bak is harmless
     except Exception:
-        try:
-            os.unlink(tmp_path_str)
-        except OSError:
-            pass
+        tmp_path.unlink(missing_ok=True)
+        backup.unlink(missing_ok=True)
+        raise
+    try:
+        backup.unlink()
+    except OSError:
+        pass
+
+
+def save_new_workbook(workbook: Workbook, path: str | Path) -> None:
+    """Write a new workbook. An existing file is replaced only after it validates."""
+    target = Path(path).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = _temp_workbook_path(target.parent, target.suffix)
+    try:
+        workbook.save(tmp_path)
+        _assert_package_consistent(tmp_path)
+        os.replace(tmp_path, target)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
         raise

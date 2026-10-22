@@ -29,8 +29,9 @@ build/
 output/
 *.json.bak
 
-# ignore all md files (except README.md)
+# ignore all md files (except README.md and the portable skill)
 *.md
+!setup/**/*.md
 
 # ignore all .bak files
 *.bak

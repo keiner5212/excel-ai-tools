@@ -16,6 +16,7 @@ from spreadsheet_tools.utils import (
     parse_cell_address,
     resolve_output_path,
     safe_save_workbook,
+    save_new_workbook,
     validate_cell_address,
     validate_cell_range,
     validate_column,
@@ -191,15 +192,7 @@ def batch_edit(
     try:
         sheet = get_sheet(workbook, sheet_name)
         merge_lookup = build_merge_lookup(sheet)
-        # Detect duplicate cell addresses — only last write wins, which is silently
-        # confusing for AI-generated edit lists.
-        seen: dict[str, int] = {}
-        for i, edit in enumerate(edits):
-            addr_key = validate_cell_address(edit["cell"])
-            seen.setdefault(addr_key, i)
-
-        dupes = [addr for addr, first_i in seen.items() if first_i != edits.index(next(e for e in edits if validate_cell_address(e["cell"]) == addr))]
-        # Simpler approach: flag any address that appears more than once
+        # Last write wins. Surface that so a duplicated address is not silent.
         addr_counts: dict[str, int] = {}
         for edit in edits:
             addr = validate_cell_address(edit["cell"])
@@ -208,7 +201,7 @@ def batch_edit(
         for addr, count in addr_counts.items():
             if count > 1:
                 duplicate_warnings.append(
-                    f"{addr} appears {count} times — only the last value will be written"
+                    f"{addr} appears {count} times - only the last value will be written"
                 )
 
         applied: list[dict[str, Any]] = []
@@ -275,16 +268,19 @@ def batch_edit(
 def create_empty_workbook(path: str, sheet_name: str = "Sheet1") -> dict[str, Any]:
     """Create new empty workbook with one sheet, overwriting existing file.
 
-    Bare filenames (no directory component) are automatically placed in workspace/.
+    Bare filenames (no directory component) are placed in workspace/.
+    Any other path is kept (~ expanded). Missing parent directories are created.
     Always returns the absolute path so callers can reuse it without ambiguity.
     """
     resolved = resolve_output_path(path)
     workbook = Workbook()
-    ws = workbook.active
-    assert ws is not None  # Workbook() always creates an active sheet
-    ws.title = sheet_name
-    workbook.save(resolved)
-    # Resolve to absolute so AI agents can reuse the returned path directly
+    try:
+        ws = workbook.active
+        assert ws is not None  # Workbook() always creates an active sheet
+        ws.title = sheet_name
+        save_new_workbook(workbook, resolved)
+    finally:
+        workbook.close()
     return {"file": str(resolved.resolve()), "sheet": sheet_name, "created": True}
 
 
@@ -612,12 +608,14 @@ def set_tab_color(
 ) -> dict[str, Any]:
     """Set the sheet tab color. Color is a 6-char hex RGB string, e.g. '1F4E79'."""
     normalized = color.strip().upper().lstrip("#")
-    if len(normalized) not in (6, 8):
+    if re.fullmatch(r"[0-9A-F]{8}", normalized):
+        argb = normalized
+    elif re.fullmatch(r"[0-9A-F]{6}", normalized):
+        argb = f"FF{normalized}"
+    else:
         raise ValueError(
             f"Color must be a 6-char RGB hex (e.g. '1F4E79'), got {color!r}"
         )
-    # Ensure ARGB format: prefix FF if only 6 chars
-    argb = normalized if len(normalized) == 8 else f"FF{normalized}"
     workbook = open_workbook_for_write(path)
     try:
         sheet = get_sheet(workbook, sheet_name)

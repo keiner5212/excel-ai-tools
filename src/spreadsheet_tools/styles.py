@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -141,17 +142,16 @@ def get_cell_style(worksheet: Worksheet, address: str) -> dict[str, Any]:
 def _parse_color(value: str | None) -> str | None:
     if value is None:
         return None
-    normalized = value.strip().upper()
-    if normalized.startswith("#"):
-        normalized = normalized[1:]
-    # Expand 3-char shorthand #RGB -> RRGGBB before prefix check.
-    if len(normalized) == 3:
+    normalized = value.strip().upper().removeprefix("#")
+    if len(normalized) == 3 and re.fullmatch(r"[0-9A-F]{3}", normalized):
         normalized = "".join(c * 2 for c in normalized)
-    if normalized.startswith("FF") and len(normalized) == 8:
-        return normalized
-    if len(normalized) == 6:
+    if re.fullmatch(r"[0-9A-F]{6}", normalized):
         return f"FF{normalized}"
-    return normalized
+    if re.fullmatch(r"[0-9A-F]{8}", normalized):
+        return normalized
+    raise ValueError(
+        f"Invalid color {value!r}. Expected 6 or 8 hex digits, optional leading #."
+    )
 
 
 _SENTINEL = object()

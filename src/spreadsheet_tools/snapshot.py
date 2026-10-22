@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,7 @@ def create_snapshot(
             "sheet": actual_sheet,
             "tag": tag,
             "description": description,
-            "created_at": datetime.now(tz=timezone.utc).isoformat(),
+            "created_at": datetime.now(tz=UTC).isoformat(),
             "row_count": len(rows_data),
             "rows": rows_data,
         }
@@ -195,9 +195,16 @@ def list_snapshots(
                     "row_count": data.get("row_count"),
                 }
             )
-        except Exception:
-            # Skip snapshots that cannot be parsed
-            pass
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            snapshots.append(
+                {
+                    "tag": snap_file.stem,
+                    "description": None,
+                    "created_at": None,
+                    "row_count": None,
+                    "unreadable": True,
+                }
+            )
 
     return {
         "file": path,

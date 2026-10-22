@@ -1,0 +1,82 @@
+name: Binaries
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install project
+        run: uv sync --frozen --no-dev
+
+      - name: Build standalone executable
+        run: uv run --no-dev --with pyinstaller python scripts/build_binary.py
+
+      - name: Smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=(dist/spreadsheet-tools-*)
+          test -f "${bin[0]}"
+          "${bin[0]}" --help
+          "${bin[0]}" create-empty-workbook "${RUNNER_TEMP}/smoke.xlsx" --sheet Data
+          test -f "${RUNNER_TEMP}/smoke.xlsx"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}
+          path: dist/spreadsheet-tools-*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: dist
+
+      - name: Pack the skill
+        run: python3 -c "import shutil; shutil.make_archive('dist/spreadsheet-tools-skill', 'zip', 'setup', 'spreadsheet-tools')"
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)"
+          tag="v${version}"
+          notes="Standalone binaries. Pick the file for your OS. No Python or uv install. spreadsheet-tools-skill.zip is the agent skill."
+          mapfile -t files < <(find dist -type f \( -name 'spreadsheet-tools-*' -o -name 'spreadsheet-tools-skill.zip' \))
+          test "${#files[@]}" -gt 0
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" --draft --title "spreadsheet-tools $tag" --notes "$notes"
+          fi
